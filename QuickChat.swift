@@ -35,6 +35,8 @@ final class ACPClient {
     var onToolUpdate: ((_ id: String, _ status: String) -> Void)?
     var onTurnComplete: ((_ stopReason: String) -> Void)?
     var onSessionTitle: ((String) -> Void)?
+    var onModels: ((_ models: [ModelOption], _ current: String?) -> Void)?
+    var onCommands: ((_ commands: [ChatCommand]) -> Void)?
 
     init(hermesPath: String) { self.hermesPath = hermesPath }
 
@@ -84,19 +86,37 @@ final class ACPClient {
                     // Reduce approval prompts; harmless if unsupported.
                     self.notify("session/set_mode", ["sessionId": sid, "modeId": "dont_ask"])
                     self.emitStatus("ready")
+                    // Expose the session's selectable models (for mid-chat switching).
+                    if let models = r["models"] as? [String: Any],
+                       let avail = models["availableModels"] as? [[String: Any]] {
+                        let list = avail.compactMap { m -> ModelOption? in
+                            guard let id = m["modelId"] as? String else { return nil }
+                            return ModelOption(id: id, name: (m["name"] as? String) ?? id)
+                        }
+                        let current = models["currentModelId"] as? String
+                        self.main { self.onModels?(list, current) }
+                    }
                 }
             }
         }
     }
 
-    func send(_ text: String) {
+    func send(_ text: String, images: [(base64: String, mime: String)] = []) {
         guard let sid = sessionId else { return }
-        request("session/prompt", ["sessionId": sid,
-                                    "prompt": [["type": "text", "text": text]]]) { [weak self] res in
+        var blocks: [[String: Any]] = []
+        if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
+        for img in images { blocks.append(["type": "image", "data": img.base64, "mimeType": img.mime]) }
+        guard !blocks.isEmpty else { return }
+        request("session/prompt", ["sessionId": sid, "prompt": blocks]) { [weak self] res in
             var reason = "end_turn"
             if case .success(let r) = res { reason = r["stopReason"] as? String ?? "end_turn" }
             self?.main { self?.onTurnComplete?(reason) }
         }
+    }
+
+    func setModel(_ modelId: String) {
+        guard let sid = sessionId else { return }
+        request("session/set_model", ["sessionId": sid, "modelId": modelId]) { _ in }
     }
 
     func cancel() {
@@ -210,6 +230,14 @@ final class ACPClient {
             main { self.onToolUpdate?(id, status) }
         case "session_info_update":
             if let t = u["title"] as? String { main { self.onSessionTitle?(t) } }
+        case "available_commands_update":
+            if let cmds = u["availableCommands"] as? [[String: Any]] {
+                let list = cmds.compactMap { c -> ChatCommand? in
+                    guard let n = c["name"] as? String else { return nil }
+                    return ChatCommand(name: n, hasInput: c["input"] != nil)
+                }
+                main { self.onCommands?(list) }
+            }
         default:
             break
         }

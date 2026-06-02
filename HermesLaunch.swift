@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusInfoItem: NSMenuItem!
     private var usageInfoItem: NSMenuItem!
     private var updateInfoItem: NSMenuItem!
+    private var launchUpdateItem: NSMenuItem!
     private var headerSeparator: NSMenuItem!
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
@@ -43,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var usageCache: (text: String?, fetched: Date)? = nil
     private var updateAvailable = false
     private var updateNotified = false
+    private var launchUpdateAvailable = false
+    private var launchUpdateNotified = false
     private var doctorRunning = false
     private var currentProfile: String? = nil
 
@@ -55,6 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var chatController: ChatWindowController?
     private var usageWindow: NSWindow?
     private var usageModel: UsageModel?
+    private var cronWindow: NSWindow?
+    private var cronModel: CronModel?
+    private var sessionsWindow: NSWindow?
+    private var sessionsModel: SessionsModel?
+    private var logWindow: NSWindow?
+    private var logModel: LogModel?
+    private var skillsWindow: NSWindow?
+    private var skillsModel: SkillsModel?
 
     // Customizable "Show model" text effect (Feature 8)
     private var menuBarFXTimer: Timer?
@@ -137,12 +148,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.pollState()
         }
 
-        // Update checker: once 60s after launch, then every 30 minutes.
+        // Update checkers: shortly after launch, then every 30 minutes (Hermes CLI + HermesLaunch itself).
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
             self?.checkForUpdate()
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
+            self?.checkForLaunchUpdate()
+        }
         updateTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
             self?.checkForUpdate()
+            self?.checkForLaunchUpdate()
         }
 
         // Menu-bar text: restore persisted display mode and start its timer if needed.
@@ -239,6 +254,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateInfoItem.isHidden = true
         menu.addItem(updateInfoItem)
 
+        launchUpdateItem = NSMenuItem(title: "● HermesLaunch update available",
+                                      action: #selector(installLaunchUpdate),
+                                      keyEquivalent: "")
+        launchUpdateItem.target = self
+        launchUpdateItem.isHidden = true
+        menu.addItem(launchUpdateItem)
+
         headerSeparator = NSMenuItem.separator()
         menu.addItem(headerSeparator)
 
@@ -283,6 +305,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                keyEquivalent: "")
         usage.target = self
         menu.addItem(usage)
+
+        // Manage submenu (Scheduled Tasks, and — added in later phases — Sessions,
+        // Skills, Logs, Backup & Restore).
+        let manageItem = NSMenuItem(title: "Manage", action: nil, keyEquivalent: "")
+        let manageMenu = NSMenu()
+        manageMenu.autoenablesItems = false
+        for (title, sel) in [("Scheduled Tasks…", #selector(openScheduledTasks)),
+                             ("Sessions…", #selector(openSessions)),
+                             ("Skills…", #selector(openSkills)),
+                             ("Logs…", #selector(openLogs))] {
+            let i = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            i.target = self
+            manageMenu.addItem(i)
+        }
+        manageMenu.addItem(.separator())
+        for (title, sel) in [("Back Up…", #selector(backupHermes)),
+                             ("Restore from Backup…", #selector(restoreHermes))] {
+            let i = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            i.target = self
+            manageMenu.addItem(i)
+        }
+        manageItem.submenu = manageMenu
+        menu.addItem(manageItem)
 
         // Menu Bar Display submenu
         menuBarDisplayItem = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
@@ -382,6 +427,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let reveal = NSMenuItem(title: "Reveal Logs in Finder", action: #selector(revealLogs), keyEquivalent: "")
         reveal.target = self
         m.addItem(reveal)
+
+        m.addItem(.separator())
+
+        let send = NSMenuItem(title: "Send Message…", action: #selector(openQuickSend), keyEquivalent: "")
+        send.target = self
+        m.addItem(send)
 
         return m
     }
@@ -968,6 +1019,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         runInTerminal([hermesPath, "update"])
     }
 
+    // MARK: - HermesLaunch self-update (Feature 11B)
+
+    /// The git clone HermesLaunch was built from: the app bundle's parent dir,
+    /// iff it's a HermesLaunch git work tree. nil for an /Applications copy.
+    private lazy var appRepoPath: String? = {
+        let dir = Bundle.main.bundleURL.deletingLastPathComponent().path
+        guard let git = Self.gitPath else { return nil }
+        guard Self.run(git, ["-C", dir, "rev-parse", "--is-inside-work-tree"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines) == "true" else { return nil }
+        let origin = Self.run(git, ["-C", dir, "remote", "get-url", "origin"]).out
+        return origin.contains("HermesLaunch") ? dir : nil
+    }()
+
+    private static let gitPath: String? = {
+        for p in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]
+        where FileManager.default.isExecutableFile(atPath: p) { return p }
+        return nil
+    }()
+
+    /// Run a tool, capturing merged stdout+stderr; drains before waiting to avoid
+    /// the pipe-buffer deadlock. Returns (output, success).
+    private static func run(_ launch: String, _ args: [String], cwd: String? = nil) -> (out: String, ok: Bool) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: launch)
+        p.arguments = args
+        if let cwd = cwd { p.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe   // merge so error text is captured
+        do { try p.run() } catch { return ("", false) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (String(data: data, encoding: .utf8) ?? "", p.terminationStatus == 0)
+    }
+
+    private func checkForLaunchUpdate() {
+        guard let repo = appRepoPath, let git = Self.gitPath else { return }
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self else { return }
+            _ = Self.run(git, ["-C", repo, "fetch", "--quiet"])
+            let countOut = Self.run(git, ["-C", repo, "rev-list", "--count", "HEAD..@{u}"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let n = Int(countOut) ?? 0
+            let subject = n > 0 ? Self.run(git, ["-C", repo, "log", "-1", "--format=%s", "@{u}"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            DispatchQueue.main.async {
+                let was = self.launchUpdateAvailable
+                self.launchUpdateAvailable = (n > 0)
+                self.launchUpdateItem.isHidden = (n == 0)
+                if n > 0 {
+                    self.launchUpdateItem.title = "● HermesLaunch update available (\(n))"
+                    if !was && !self.launchUpdateNotified {
+                        self.notify(title: "HermesLaunch update available",
+                                    body: "\(n) new commit\(n == 1 ? "" : "s"). Latest: \(subject.prefix(80))")
+                        self.launchUpdateNotified = true
+                    }
+                } else {
+                    self.launchUpdateNotified = false
+                }
+            }
+        }
+    }
+
+    @objc private func installLaunchUpdate() {
+        guard let repo = appRepoPath, let git = Self.gitPath else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let confirm = NSAlert()
+        confirm.alertStyle = .informational
+        confirm.messageText = "Update HermesLaunch?"
+        confirm.informativeText = "This pulls the latest code from GitHub, rebuilds the app, and relaunches it."
+        confirm.addButton(withTitle: "Update & Relaunch")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        notify(title: "Updating HermesLaunch…", body: "Pulling latest changes and rebuilding.")
+        let appURL = Bundle.main.bundleURL
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let pull = Self.run(git, ["-C", repo, "pull", "--ff-only"])
+            guard pull.ok else {
+                self.main { self.notify(title: "Update failed",
+                    body: "Couldn’t pull (commit or stash local changes first). \(pull.out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(120))") }
+                return
+            }
+            let build = Self.run("\(repo)/build.sh", [], cwd: repo)
+            guard build.ok else {
+                self.main { self.notify(title: "Build failed",
+                    body: String(build.out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(140))) }
+                return
+            }
+            self.main {
+                let cfg = NSWorkspace.OpenConfiguration()
+                cfg.createsNewApplicationInstance = true
+                NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, _ in
+                    DispatchQueue.main.async { NSApp.terminate(nil) }
+                }
+            }
+        }
+    }
+
+    private func main(_ work: @escaping () -> Void) { DispatchQueue.main.async(execute: work) }
+
     // MARK: - Doctor (#15)
 
     @objc private func runDoctor() {
@@ -1150,9 +1303,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let p = Process()
         p.launchPath = hermesPath
         p.arguments = args
-        let null = Pipe()
-        p.standardOutput = null
-        p.standardError = null
+        // Null devices (not Pipes) so output is discarded by the OS — an undrained
+        // pipe would deadlock the child once its buffer fills.
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
         do {
             try p.run()
             if wait { p.waitUntilExit() }
@@ -1166,16 +1320,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.launchPath = hermesPath
         p.arguments = args
         let out = Pipe()
-        let err = Pipe()
         p.standardOutput = out
-        p.standardError = err
+        // Discard stderr to a null device: we only use stdout, and an undrained
+        // stderr pipe deadlocks the child once its 64KB buffer fills.
+        p.standardError = FileHandle.nullDevice
         do {
             try p.run()
-            p.waitUntilExit()
         } catch {
             return ""
         }
+        // Drain stdout to EOF BEFORE waiting, so a large stdout can't fill the
+        // pipe buffer and block the child (which would hang waitUntilExit).
         let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
         return String(data: data, encoding: .utf8) ?? ""
     }
 
@@ -1209,6 +1366,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func resumeSession(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        resume(sessionID: id)
+    }
+
+    func resume(sessionID id: String) {
         ensureGatewayRunning()
         runInTerminal(["/usr/bin/caffeinate", "-is", hermesPath, "--resume", id, "--tui"])
         bumpPoll()
@@ -1550,6 +1711,215 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         chatController?.show()
+    }
+
+    // MARK: - Scheduled Tasks window (Feature 10 · Phase 1)
+
+    @objc private func openScheduledTasks() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = cronWindow {
+            w.makeKeyAndOrderFront(nil)
+            cronModel?.load()
+            return
+        }
+        let model = CronModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
+        cronModel = model
+
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 560),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Scheduled Tasks — Hermes"
+        win.minSize = NSSize(width: 460, height: 420)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: ScheduledTasksView(model: model))
+        cronWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Sessions browser + Log viewer (Feature 10 · Phase 3)
+
+    @objc private func openSessions() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = sessionsWindow {
+            w.makeKeyAndOrderFront(nil)
+            sessionsModel?.load()
+            return
+        }
+        let model = SessionsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" },
+                                  onResume: { [weak self] id in self?.resume(sessionID: id) })
+        sessionsModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 600),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Sessions — Hermes"
+        win.minSize = NSSize(width: 480, height: 420)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: SessionsView(model: model))
+        sessionsWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openLogs() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = logWindow {
+            w.makeKeyAndOrderFront(nil)
+            logModel?.refresh()
+            return
+        }
+        let model = LogModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
+        logModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 560),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Logs — Hermes"
+        win.minSize = NSSize(width: 520, height: 360)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: LogView(model: model))
+        logWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openSkills() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = skillsWindow { w.makeKeyAndOrderFront(nil); return }
+        let model = SkillsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
+        skillsModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Skills — Hermes"
+        win.minSize = NSSize(width: 520, height: 420)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: SkillsView(model: model))
+        skillsWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Quick Send + Backup / Restore (Feature 10 · Phase 2)
+
+    @objc private func openQuickSend() {
+        NSApp.activate(ignoringOtherApps: true)
+        let targets = parseSendTargets(captureHermes(["send", "--list"]))
+        guard !targets.isEmpty else {
+            let a = NSAlert()
+            a.messageText = "No messaging targets"
+            a.informativeText = "No messaging platforms are configured. Set up Telegram/Discord/Slack in Hermes first (e.g. run `hermes setup`)."
+            a.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Send a Message"
+        alert.informativeText = "Send a one-off message through Hermes’ messaging gateway (no agent loop)."
+        alert.addButton(withTitle: "Send")
+        alert.addButton(withTitle: "Cancel")
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 96, width: 320, height: 26))
+        popup.addItems(withTitles: targets)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 84))
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 84))
+        tv.isRichText = false
+        tv.font = NSFont.systemFont(ofSize: 13)
+        tv.isVerticallyResizable = true
+        tv.textContainer?.widthTracksTextView = true
+        scroll.documentView = tv
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 130))
+        container.addSubview(popup)
+        container.addSubview(scroll)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = tv
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let target = popup.titleOfSelectedItem ?? targets[0]
+        let msg = tv.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !msg.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let out = self.captureHermes(["send", "--to", target, msg]).trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.notify(title: "Quick Send", body: out.isEmpty ? "Sent to \(target)." : String(out.prefix(180)))
+            }
+        }
+    }
+
+    private func parseSendTargets(_ text: String) -> [String] {
+        var targets: [String] = []
+        for raw in text.split(separator: "\n") {
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Section header "Telegram:" → bare platform (home channel).
+            if !line.hasPrefix(" "), trimmed.hasSuffix(":"), !trimmed.contains(" ") {
+                let platform = String(trimmed.dropLast()).lowercased()
+                if !platform.isEmpty, !targets.contains(platform) { targets.append(platform) }
+                continue
+            }
+            // Indented target "  telegram:Luis (dm)" → "telegram:Luis".
+            if line.hasPrefix(" "), trimmed.contains(":") {
+                var t = trimmed
+                if let paren = t.range(of: " (") { t = String(t[..<paren.lowerBound]) }
+                t = t.trimmingCharacters(in: .whitespaces)
+                if !t.isEmpty, !targets.contains(t) { targets.append(t) }
+            }
+        }
+        return targets
+    }
+
+    @objc private func backupHermes() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.title = "Back Up Hermes"
+        panel.message = "Saves your full Hermes setup (config, skills, sessions, data) as a zip. This can take a moment."
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd-HHmm"
+        panel.nameFieldStringValue = "hermes-backup-\(df.string(from: Date())).zip"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        notify(title: "Backing up…", body: "Creating \(url.lastPathComponent)")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let out = self.captureHermes(["backup", "-o", url.path])
+            DispatchQueue.main.async {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    self.notify(title: "Backup complete", body: url.lastPathComponent)
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } else {
+                    self.notify(title: "Backup failed",
+                                body: String(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180)))
+                }
+            }
+        }
+    }
+
+    @objc private func restoreHermes() {
+        NSApp.activate(ignoringOtherApps: true)
+        let confirm = NSAlert()
+        confirm.alertStyle = .warning
+        confirm.messageText = "Restore from a backup?"
+        confirm.informativeText = "This overwrites your current Hermes configuration, skills, sessions, and data with the backup’s contents. It can’t be undone — consider backing up first."
+        confirm.addButton(withTitle: "Choose Backup…")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        let open = NSOpenPanel()
+        open.canChooseFiles = true
+        open.canChooseDirectories = false
+        open.allowsMultipleSelection = false
+        open.title = "Choose a Hermes backup (.zip)"
+        guard open.runModal() == .OK, let url = open.url else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let out = self.captureHermes(["import", url.path, "--force"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.notify(title: "Restore finished",
+                            body: out.isEmpty ? "Restored from \(url.lastPathComponent). Restart Hermes to apply."
+                                              : String(out.prefix(180)))
+            }
+        }
     }
 
     // MARK: - Usage window (Tier 2 #6)

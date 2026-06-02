@@ -8,6 +8,9 @@ import SwiftUI
 
 enum ChatRole { case user, assistant }
 
+struct ModelOption: Identifiable, Equatable { let id: String; let name: String }
+struct ChatCommand: Identifiable { var id: String { name }; let name: String; let hasInput: Bool }
+
 struct ToolEvent: Identifiable {
     let id: String
     let kind: String
@@ -24,6 +27,7 @@ final class ChatMessage: ObservableObject, Identifiable {
     @Published var thoughts: String = ""
     @Published var tools: [ToolEvent] = []
     @Published var thinkingSeconds: Int? = nil   // set once thinking ends
+    var imageThumb: NSImage? = nil
     init(role: ChatRole, text: String = "") {
         self.role = role
         self.text = text
@@ -38,9 +42,16 @@ final class ChatViewModel: ObservableObject {
     @Published var isReady = false
     @Published var isStreaming = false
     @Published var draft: String = ""
+    @Published var models: [ModelOption] = []
+    @Published var currentModel: String?
+    @Published var commands: [ChatCommand] = []
+    @Published var pendingImage: PendingImage?
 
-    var onSend: ((String) -> Void)?
+    struct PendingImage { let base64: String; let mime: String; let thumb: NSImage?; let name: String }
+
+    var onSend: ((_ text: String, _ images: [(base64: String, mime: String)]) -> Void)?
     var onStop: (() -> Void)?
+    var onSetModel: ((String) -> Void)?
 
     private var current: ChatMessage?
     private var thinkingStart: Date?
@@ -51,17 +62,54 @@ final class ChatViewModel: ObservableObject {
     // MARK: composer → client
     func submit() {
         let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isReady, !isStreaming, !t.isEmpty else { return }
-        draft = ""
-        messages.append(ChatMessage(role: .user, text: t))
+        let img = pendingImage
+        guard isReady, !isStreaming, (!t.isEmpty || img != nil) else { return }
+        draft = ""; pendingImage = nil
+        let um = ChatMessage(role: .user, text: t.isEmpty ? "🖼 Image" : t)
+        um.imageThumb = img?.thumb
+        beginTurn(user: um)
+        let images = img.map { [(base64: $0.base64, mime: $0.mime)] } ?? []
+        onSend?(t, images)
+    }
+
+    /// Run a slash command (sent as a normal prompt; the ACP adapter intercepts it).
+    func runCommand(_ name: String) {
+        guard isReady, !isStreaming else { return }
+        beginTurn(user: ChatMessage(role: .user, text: "/\(name)"))
+        onSend?("/\(name)", [])
+    }
+
+    func selectModel(_ id: String) {
+        guard id != currentModel else { return }
+        currentModel = id
+        onSetModel?(id)
+    }
+
+    func attach(url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        pendingImage = PendingImage(base64: data.base64EncodedString(),
+                                    mime: Self.mime(for: url.pathExtension),
+                                    thumb: NSImage(contentsOf: url),
+                                    name: url.lastPathComponent)
+    }
+
+    private func beginTurn(user: ChatMessage) {
+        messages.append(user)
         let assistant = ChatMessage(role: .assistant)
         messages.append(assistant)
         current = assistant
-        thinkingStart = nil
-        pendingThought = ""; pendingAnswer = ""
+        thinkingStart = nil; pendingThought = ""; pendingAnswer = ""
         isStreaming = true
         startFlush()
-        onSend?(t)
+    }
+
+    static func mime(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return "image/png"
+        }
     }
 
     func stop() { onStop?() }
@@ -178,12 +226,29 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !vm.models.isEmpty { modelBar; Divider() }
             transcript
             Divider()
             composer
         }
         .frame(minWidth: 460, minHeight: 460)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var modelBar: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "cpu").font(.system(size: 11)).foregroundStyle(.secondary)
+            Picker("", selection: Binding(
+                get: { vm.currentModel ?? vm.models.first?.id ?? "" },
+                set: { vm.selectModel($0) }
+            )) {
+                ForEach(vm.models) { Text($0.name).tag($0.id) }
+            }
+            .labelsHidden().frame(maxWidth: 260)
+            .disabled(vm.isStreaming)
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     private var transcript: some View {
@@ -230,7 +295,13 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(spacing: 7) {
+            if let img = vm.pendingImage { attachmentChip(img) }
             HStack(alignment: .bottom, spacing: 8) {
+                commandsMenu
+                Button(action: pickImage) { Image(systemName: "paperclip").font(.system(size: 17)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .disabled(vm.isStreaming || !vm.isReady).help("Attach image")
+
                 TextField("Message Hermes…", text: $vm.draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
@@ -270,8 +341,46 @@ struct ChatView: View {
         .background(.bar)
     }
 
+    @ViewBuilder private var commandsMenu: some View {
+        if !vm.commands.isEmpty {
+            Menu {
+                ForEach(vm.commands) { c in
+                    Button("/\(c.name)") {
+                        if c.hasInput { vm.draft = "/\(c.name) " } else { vm.runCommand(c.name) }
+                    }
+                }
+            } label: { Image(systemName: "slash.circle").font(.system(size: 18)) }
+            .menuStyle(.borderlessButton).fixedSize()
+            .disabled(vm.isStreaming || !vm.isReady)
+            .help("Slash commands")
+        }
+    }
+
+    private func attachmentChip(_ img: ChatViewModel.PendingImage) -> some View {
+        HStack(spacing: 7) {
+            if let t = img.thumb {
+                Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+            Text(img.name).font(.system(size: 11)).lineLimit(1)
+            Spacer()
+            Button { vm.pendingImage = nil } label: { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+    }
+
+    private func pickImage() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true; p.canChooseDirectories = false; p.allowsMultipleSelection = false
+        p.allowedFileTypes = ["png", "jpg", "jpeg", "gif", "webp"]
+        if p.runModal() == .OK, let url = p.url { vm.attach(url: url) }
+    }
+
     private var canSend: Bool {
-        vm.isReady && !vm.isStreaming && !vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        vm.isReady && !vm.isStreaming &&
+            (!vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.pendingImage != nil)
     }
 
     private var statusColor: Color {
@@ -310,6 +419,12 @@ struct TurnView: View {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let t = message.imageThumb {
+                    Image(nsImage: t).resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 220, maxHeight: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
             Spacer(minLength: 0)
@@ -433,8 +548,9 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: ChatView(vm: vm))
 
         client = ACPClient(hermesPath: hermesPath)
-        vm.onSend = { [weak self] t in self?.client.send(t) }
+        vm.onSend = { [weak self] t, imgs in self?.client.send(t, images: imgs) }
         vm.onStop = { [weak self] in self?.client.cancel() }
+        vm.onSetModel = { [weak self] id in self?.client.setModel(id) }
 
         client.onStatus      = { [weak self] s in self?.vm.setStatus(s) }
         client.onThought     = { [weak self] t in self?.vm.appendThought(t) }
@@ -443,6 +559,8 @@ final class ChatWindowController: NSObject, NSWindowDelegate {
         client.onToolUpdate  = { [weak self] id, status in self?.vm.updateTool(id: id, status: status) }
         client.onSessionTitle = { [weak self] t in self?.window.title = "Hermes — \(t)" }
         client.onTurnComplete = { [weak self] _ in self?.vm.finishTurn() }
+        client.onModels      = { [weak self] models, current in self?.vm.models = models; self?.vm.currentModel = current }
+        client.onCommands    = { [weak self] cmds in self?.vm.commands = cmds }
         client.start()
     }
 

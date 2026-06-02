@@ -6,7 +6,7 @@
 
 ### The [Hermes Agent](https://github.com/NousResearch/hermes) — one click away in your menu bar.
 
-Launch the TUI, manage the gateway, switch models, **chat with live streaming thinking & tool activity**, and watch a **beautiful usage dashboard** — all without opening a terminal.
+Launch the TUI, manage the gateway, **schedule recurring tasks**, switch models, **chat with live streaming thinking & tool activity**, browse sessions & skills, and watch a **beautiful usage dashboard** — all without opening a terminal.
 
 <p>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-13%2B-111111?style=flat-square&logo=apple&logoColor=white" />
@@ -45,13 +45,18 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 | | |
 |---|---|
 | 🚀 **Launch the TUI, caffeinated** | Start a Hermes TUI session in one click. It runs under macOS **`caffeinate -is`**, so your Mac **won't sleep** while the agent is working — long runs and overnight tasks keep going. Stopping the session lets your Mac sleep normally again. Starting a session also auto-starts the messaging gateway. |
-| 💬 **Quick Chat** | A streaming chat window over the Hermes **ACP** protocol. Watch the model's *thinking*, see tool/search activity light up in real time (`🔍 Searching… ✓`), and read the answer as it streams. Multi-turn while the window is open. |
+| 💬 **Quick Chat** | A streaming chat over the Hermes **ACP** protocol — watch the model's *thinking* and tool/search activity in real time (`🔍 Searching… ✓`), then the streamed answer. **Switch models mid-chat**, run **slash commands** (`/reset`, `/compact`, …), and **attach images**. Multi-turn while the window is open. |
+| ⏰ **Scheduled tasks** | Create, run, pause, and delete recurring agent jobs (`hermes cron`) from a panel, with a **visual schedule builder** — Once / Every / Daily / Weekly / Custom-cron — plus a prompt and a delivery target (Telegram/Discord/local). Turns the menu bar into a cockpit for autonomous tasks. |
 | 📊 **Usage dashboard** | A vibrant SwiftUI + Swift Charts view of `hermes insights`: stat cards (sessions, tokens, tool calls, messages, active time), an input/output token donut, and bar charts for models, weekday activity, top tools, and platforms — over Today / 7 days / 30 days. Plus a one-click link to the full **web dashboard**. |
-| 🛰 **Gateway control** | Start / stop / restart the Hermes messaging gateway, see its live status and PID, tail its logs in a terminal, or reveal the logs folder in Finder. |
-| 🔄 **Resume recent sessions** | Jump back into any of your 10 most recent sessions (with last-active time) — each resumes caffeinated, gateway ensured. |
-| 🧠 **Models & profiles** | Save favorite models and one-click switch the persisted default, switch the active profile, or open the full interactive model picker. |
+| 🗂 **Sessions browser** | Search, rename, delete, and resume past conversations, with a store-stats header (sessions · messages · DB size). Resuming runs caffeinated, gateway ensured. |
+| 🧩 **Skills browser** | Search the skill registries and **install / update / uninstall** skills — a mini app-store for the agent's abilities, right from the menu bar. |
+| 🛰 **Gateway control** | Start / stop / restart the messaging gateway, see live status and PID, tail logs, reveal the logs folder, or **send a one-off message** to Telegram/Discord/Slack/Signal. |
+| 🧠 **Models & profiles** | Save favorite models and one-click switch the persisted default; switch *or create* profiles; or open the full interactive picker. |
 | 🪄 **Menu-bar display** | Show the icon, the current model name, or today's token count. The model name supports a **customizable color effect** — rainbow, solid, gradient wave, or pulse — with your own colors, speed, and band tightness, edited in a live, in-app settings window. |
+| 🪵 **Log viewer** | View, follow, and filter the agent · errors · gateway · gui logs (by level) in a native window — no terminal needed. |
+| 💾 **Backup & restore** | One-click zip backup of your entire Hermes setup, and restore from a backup. |
 | 📨 **Send to Hermes** | A system-wide **Services** action: select text in *any* app → *Services → Send to Hermes* → the reply is copied to your clipboard with a preview notification. |
+| 🔁 **Self-updating** | When run from a git clone, HermesLaunch notices new commits on its GitHub repo, notifies you, and can **pull → rebuild → relaunch** in one click. |
 | 📡 **Status at a glance** | A color-coded menu-bar icon plus header rows showing the current model · provider and today's session/token usage — refreshed by 5-second background polling. |
 | 🩺 **Diagnostics & updates** | Run `hermes doctor` (results summarized, full output on failure), and get notified when a new Hermes version is available — install it from the menu. |
 | 🔔 **Native notifications** | macOS notifications when the TUI exits, the gateway stops, an update is available, doctor finishes, or a *Send to Hermes* reply is ready. |
@@ -81,19 +86,40 @@ Style the menu-bar model name however you like — **rainbow**, **solid**, a **g
 </table>
 </div>
 
+## 🗂 A control panel for Hermes
+
+Everything Hermes can do — scheduling, sessions, skills — without a terminal.
+
+<div align="center">
+<table>
+  <tr>
+    <td width="34%"><img src="assets/scheduled-tasks.png" alt="Scheduled tasks" width="100%" /></td>
+    <td width="33%"><img src="assets/skills.png" alt="Skills browser" width="100%" /></td>
+    <td width="33%"><img src="assets/sessions.png" alt="Sessions browser" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Scheduled tasks</b> — recurring agent jobs</sub></td>
+    <td align="center"><sub><b>Skills</b> — search & install</sub></td>
+    <td align="center"><sub><b>Sessions</b> — search, resume, manage</sub></td>
+  </tr>
+</table>
+</div>
+
 ## 🧭 What's in the menu
 
 Click the menu-bar **H** to get:
 
 - **Status** — current model · provider *(read-only)*
 - **Today** — sessions · tokens used today *(read-only)*
-- **● Update available** — appears when a newer Hermes is out; click to install
-- **Quick Chat…** `⌘A` — open the streaming chat window
-- **Gateway ▸** — Status (running/PID) · Restart · Stop · Start · Tail Logs · Reveal Logs in Finder
-- **Profile: \<name\> ▸** — switch the active Hermes profile
-- **Model ▸** — your favorites (one click to switch) · Save Current Model as Favorite · Forget Favorite · Change Model… (full picker)
+- **● Update available** — a newer **Hermes** is out; click to install
+- **● HermesLaunch update available** — new commits on the repo; click to pull, rebuild & relaunch *(only when run from a git clone)*
+- **Quick Chat…** `⌘A` — streaming chat (switch model mid-chat · slash commands · attach images)
+- **Gateway ▸** — Status (running/PID) · Restart · Stop · Start · Tail Logs · Reveal Logs in Finder · **Send Message…**
+- **Profile: \<name\> ▸** — switch the active profile · **New Profile…**
+- **Model ▸** — favorites (one click to switch) · Save Current as Favorite · Forget Favorite · Change Model… (full picker)
 - **Run Doctor** — run `hermes doctor` and summarize the results
 - **Usage…** — open the in-app usage dashboard (+ *Open Full Dashboard…*)
+- **Manage ▸** — **Scheduled Tasks…** · **Sessions…** · **Skills…** · **Logs…** · **Back Up…** · **Restore from Backup…**
 - **Menu Bar Display ▸** — Icon only · Show model · Show today's tokens · **Customize Style…**
 - **Start Hermes** `⌘S` — launch the TUI (caffeinated; auto-starts the gateway)
 - **Stop Hermes** `⌘X` — stop the running TUI session
@@ -165,7 +191,8 @@ defaults delete com.hermeslaunch.HermesLaunch   # clears saved preferences
 
 Issues and PRs welcome. The whole app is a handful of Swift files compiled by `build.sh`
 (`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`, `UsageDashboard.swift`,
-`MenuBarStyleSettings.swift`) — no project file, no package manager.
+`MenuBarStyleSettings.swift`, `ScheduledTasks.swift`, `SessionsBrowser.swift`, `LogViewer.swift`,
+`SkillsBrowser.swift`) — no project file, no package manager.
 
 The app icon is generated from code: edit `make_icon.swift`, then run `./make_icons.sh` to
 regenerate the master PNG, the `.iconset`, and `AppIcon.icns`.
