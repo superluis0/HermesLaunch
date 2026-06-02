@@ -10,10 +10,16 @@ import SwiftUI
 struct MenuBarStyle: Codable, Equatable {
     enum Style: String, Codable, CaseIterable { case rainbow, solid, gradient, pulse }
     var style: Style = .rainbow
-    var colorsHex: [String] = ["#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#5E5CE6"]
+    // Default for solid/gradient/pulse — a distinct 3-color blend (NOT a full
+    // spectrum, so Gradient doesn't look like Rainbow). Rainbow ignores this.
+    var colorsHex: [String] = ["#0A84FF", "#BF5AF2", "#FF375F"]
     var speed: Double = 0.5         // 0…1
     var tightness: Double = 0.5     // 0…1
     var onlyWhileRunning: Bool = true
+
+    /// The pre-v9 default palette (a full spectrum). Used to migrate existing
+    /// users off it so Gradient stops mirroring Rainbow.
+    static let legacySpectrumDefault = ["#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#5E5CE6"]
 
     /// Parsed sRGB palette (always ≥1 color).
     var palette: [(r: Double, g: Double, b: Double)] {
@@ -97,125 +103,175 @@ enum MenuBarFX {
     static func nsColor(_ c: (r: Double, g: Double, b: Double, a: Double)) -> NSColor {
         NSColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(c.a))
     }
-}
 
-// MARK: - View model
-
-final class MenuBarStyleModel: ObservableObject {
-    @Published var style: MenuBarStyle { didSet { onChange?(style) } }
-    var onChange: ((MenuBarStyle) -> Void)?
-    init(style: MenuBarStyle) { self.style = style }
+    /// In-app swatch palette: rows of hex. Each hue row runs light→dark; the last
+    /// row is neutrals. Used by the color picker UI (no native color panel).
+    static let swatches: [[String]] = {
+        // 9 base hues (fractions of the wheel) × 5 shades (light → dark).
+        let hues: [Double] = [0.00, 0.07, 0.13, 0.33, 0.47, 0.58, 0.66, 0.78, 0.92]
+        let shades: [(s: Double, b: Double)] = [
+            (0.28, 1.00), (0.55, 0.97), (0.78, 0.90), (0.92, 0.74), (1.00, 0.55),
+        ]
+        var rows: [[String]] = hues.map { h in
+            shades.map { sh in hex(fromRGB: hsb(h, sh.s, sh.b)) }
+        }
+        // Neutrals row: white → black.
+        rows.append(["#FFFFFF", "#C7C7CC", "#8E8E93", "#48484A", "#1C1C1E"])
+        return rows
+    }()
 }
 
 // MARK: - Settings view
 
 struct MenuBarStyleView: View {
-    @ObservedObject var model: MenuBarStyleModel
+    let initial: MenuBarStyle
+    var onApply: (MenuBarStyle) -> Void
+    var onCancel: () -> Void
+
+    @State private var working: MenuBarStyle
+    @State private var activeSlot: Int = 0
     private let sampleText = "gpt-5.5"
 
-    private var s: Binding<MenuBarStyle> { $model.style }
+    init(initial: MenuBarStyle, onApply: @escaping (MenuBarStyle) -> Void, onCancel: @escaping () -> Void) {
+        self.initial = initial
+        self.onApply = onApply
+        self.onCancel = onCancel
+        _working = State(initialValue: initial)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Menu Bar Style").font(.system(size: 16, weight: .bold))
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Menu Bar Style").font(.system(size: 16, weight: .bold))
+                    preview
 
-            preview
+                    Picker("", selection: $working.style) {
+                        Text("Rainbow").tag(MenuBarStyle.Style.rainbow)
+                        Text("Solid").tag(MenuBarStyle.Style.solid)
+                        Text("Gradient").tag(MenuBarStyle.Style.gradient)
+                        Text("Pulse").tag(MenuBarStyle.Style.pulse)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
 
-            Picker("Style", selection: s.style) {
-                Text("Rainbow").tag(MenuBarStyle.Style.rainbow)
-                Text("Solid").tag(MenuBarStyle.Style.solid)
-                Text("Gradient wave").tag(MenuBarStyle.Style.gradient)
-                Text("Pulse").tag(MenuBarStyle.Style.pulse)
+                    colorSection
+
+                    if working.style == .rainbow || working.style == .gradient {
+                        slider("Band tightness", value: $working.tightness)
+                    }
+                    if MenuBarFX.needsAnimation(working.style, speed: 1) {
+                        slider("Speed", value: $working.speed)
+                    }
+
+                    Toggle("Animate only while Hermes is running", isOn: $working.onlyWhileRunning)
+                        .toggleStyle(.checkbox)
+                }
+                .padding(18)
             }
-            .pickerStyle(.segmented)
-
-            colorControls
-
-            if model.style.style == .rainbow || model.style.style == .gradient {
-                slider("Band tightness", value: s.tightness)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { onCancel() }.keyboardShortcut(.cancelAction)
+                Button("Apply") { onApply(working) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
             }
-            if MenuBarFX.needsAnimation(model.style.style, speed: 1) {
-                slider("Speed", value: s.speed)
-            }
-
-            Toggle("Animate only while Hermes is running", isOn: s.onlyWhileRunning)
-                .toggleStyle(.checkbox)
-
-            Spacer(minLength: 0)
+            .padding(12)
         }
-        .padding(18)
-        .frame(width: 380, height: 360)
+        .frame(width: 400, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // Live preview using TimelineView so it animates without a manual timer.
+    // Live preview — reads `working`, so every edit repaints. Animates via TimelineView.
     private var preview: some View {
         TimelineView(.animation) { context in
-            let phase = MenuBarFX.frac(context.date.timeIntervalSinceReferenceDate
-                                       * (0.15 + model.style.speed * 1.6))
+            let animated = MenuBarFX.needsAnimation(working.style, speed: working.speed)
+            let phase = animated
+                ? MenuBarFX.frac(context.date.timeIntervalSinceReferenceDate * (0.15 + working.speed * 1.6))
+                : 0
             let chars = Array(sampleText)
             HStack(spacing: 0) {
                 ForEach(chars.indices, id: \.self) { i in
-                    let animated = MenuBarFX.needsAnimation(model.style.style, speed: model.style.speed)
-                    let rgba = MenuBarFX.rgba(style: model.style.style,
-                                              palette: model.style.palette,
+                    let rgba = MenuBarFX.rgba(style: working.style, palette: working.palette,
                                               index: i, count: chars.count,
-                                              phase: animated ? phase : 0,
-                                              tightness: model.style.tightness)
+                                              phase: phase, tightness: working.tightness)
                     Text(String(chars[i]))
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(Color(MenuBarFX.nsColor(rgba)))
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .underPageBackgroundColor)))
         }
     }
 
-    @ViewBuilder private var colorControls: some View {
-        switch model.style.style {
-        case .rainbow:
-            Text("Rainbow uses the full color spectrum.")
+    // MARK: color picking (in-app, no native panel)
+
+    @ViewBuilder private var colorSection: some View {
+        if working.style == .rainbow {
+            Text("Rainbow cycles the full color spectrum — no colors to pick.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-        case .solid, .pulse:
-            HStack {
-                Text(model.style.style == .pulse ? "Pulse color" : "Color").font(.system(size: 12))
-                Spacer()
-                colorWell(0)
-            }
-        case .gradient:
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Colors").font(.system(size: 12))
-                    Spacer()
-                    Button { removeColor() } label: { Image(systemName: "minus") }
-                        .disabled(model.style.colorsHex.count <= 2)
-                    Button { addColor() } label: { Image(systemName: "plus") }
-                        .disabled(model.style.colorsHex.count >= 5)
-                }
-                HStack(spacing: 8) {
-                    ForEach(model.style.colorsHex.indices, id: \.self) { i in colorWell(i) }
-                    Spacer()
-                }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                slotRow
+                swatchGrid
             }
         }
     }
 
-    private func colorWell(_ i: Int) -> some View {
-        ColorPicker("", selection: Binding(
-            get: {
-                guard i < model.style.colorsHex.count,
-                      let rgb = MenuBarFX.rgb(fromHex: model.style.colorsHex[i]) else { return .white }
-                return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
-            },
-            set: { newColor in
-                let ns = NSColor(newColor).usingColorSpace(.sRGB) ?? .white
-                let hex = MenuBarFX.hex(fromRGB: (Double(ns.redComponent), Double(ns.greenComponent), Double(ns.blueComponent)))
-                if i < model.style.colorsHex.count { model.style.colorsHex[i] = hex }
+    private var slotRow: some View {
+        let isGradient = working.style == .gradient
+        let count = isGradient ? working.colorsHex.count : 1
+        return HStack(spacing: 8) {
+            ForEach(0..<count, id: \.self) { i in chip(i) }
+            if isGradient {
+                Button { addColor() } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderless).disabled(working.colorsHex.count >= 5)
+                Button { removeColor() } label: { Image(systemName: "minus") }
+                    .buttonStyle(.borderless).disabled(working.colorsHex.count <= 2)
             }
-        ))
-        .labelsHidden()
+            Spacer()
+        }
+    }
+
+    private func chip(_ i: Int) -> some View {
+        let isActive = (effectiveSlot == i)
+        return RoundedRectangle(cornerRadius: 6)
+            .fill(color(forHex: hex(at: i)))
+            .frame(width: 36, height: 24)
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isActive ? Color.accentColor : Color.primary.opacity(0.15),
+                              lineWidth: isActive ? 3 : 1))
+            .onTapGesture { activeSlot = i }
+    }
+
+    private var swatchGrid: some View {
+        let hueRows = Array(MenuBarFX.swatches.dropLast())   // 9 hue rows × 5 shades
+        let neutrals = MenuBarFX.swatches.last ?? []
+        let shadeCount = hueRows.first?.count ?? 5
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(0..<shadeCount, id: \.self) { shade in
+                HStack(spacing: 6) {
+                    ForEach(hueRows.indices, id: \.self) { h in swatch(hueRows[h][shade]) }
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(neutrals.indices, id: \.self) { i in swatch(neutrals[i]) }
+            }
+        }
+    }
+
+    private func swatch(_ hexStr: String) -> some View {
+        let selected = hex(at: effectiveSlot).caseInsensitiveCompare(hexStr) == .orderedSame
+        return RoundedRectangle(cornerRadius: 5)
+            .fill(color(forHex: hexStr))
+            .frame(width: 30, height: 26)
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(selected ? Color.primary : Color.primary.opacity(0.12),
+                              lineWidth: selected ? 2.5 : 0.5))
+            .onTapGesture { setActiveColor(hexStr) }
     }
 
     private func slider(_ label: String, value: Binding<Double>) -> some View {
@@ -225,10 +281,41 @@ struct MenuBarStyleView: View {
         }
     }
 
+    // MARK: helpers
+
+    /// The slot index currently being edited (always 0 for solid/pulse).
+    private var effectiveSlot: Int {
+        working.style == .gradient ? min(activeSlot, working.colorsHex.count - 1) : 0
+    }
+
+    private func hex(at i: Int) -> String {
+        (i >= 0 && i < working.colorsHex.count) ? working.colorsHex[i] : "#FFFFFF"
+    }
+
+    private func color(forHex h: String) -> Color {
+        let rgb = MenuBarFX.rgb(fromHex: h) ?? (1, 1, 1)
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    private func setActiveColor(_ h: String) {
+        let i = effectiveSlot
+        guard i >= 0, i < working.colorsHex.count else {
+            if working.colorsHex.isEmpty { working.colorsHex = [h] }
+            return
+        }
+        working.colorsHex[i] = h
+    }
+
     private func addColor() {
-        if model.style.colorsHex.count < 5 { model.style.colorsHex.append("#5E5CE6") }
+        if working.colorsHex.count < 5 {
+            working.colorsHex.append(working.colorsHex.last ?? "#5E5CE6")
+            activeSlot = working.colorsHex.count - 1
+        }
     }
     private func removeColor() {
-        if model.style.colorsHex.count > 2 { model.style.colorsHex.removeLast() }
+        if working.colorsHex.count > 2 {
+            working.colorsHex.removeLast()
+            activeSlot = min(activeSlot, working.colorsHex.count - 1)
+        }
     }
 }

@@ -62,13 +62,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuBarModelText: String?
     private let menuBarFPS: TimeInterval = 0.1      // ~10 fps animation tick
     private var menuBarStyleWindow: NSWindow?
-    private var menuBarStyleModel: MenuBarStyleModel?
 
     private let menuBarStyleKey = "menuBarStyle"
     private var menuBarStyle: MenuBarStyle {
         get {
             guard let data = UserDefaults.standard.data(forKey: menuBarStyleKey),
-                  let s = try? JSONDecoder().decode(MenuBarStyle.self, from: data) else { return MenuBarStyle() }
+                  var s = try? JSONDecoder().decode(MenuBarStyle.self, from: data) else { return MenuBarStyle() }
+            // Migrate the old full-spectrum default palette → the new gradient default
+            // (so Gradient no longer mirrors Rainbow). Custom palettes are untouched.
+            if s.colorsHex == MenuBarStyle.legacySpectrumDefault {
+                s.colorsHex = MenuBarStyle().colorsHex
+            }
             return s
         }
         set {
@@ -760,22 +764,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             w.makeKeyAndOrderFront(nil)
             return
         }
-        let model = MenuBarStyleModel(style: menuBarStyle)
-        model.onChange = { [weak self] newStyle in
-            guard let self = self else { return }
-            self.menuBarStyle = newStyle
-            self.updateMenuBarAnimation()   // re-evaluates animation + repaints
-        }
-        menuBarStyleModel = model
+        let view = MenuBarStyleView(
+            initial: menuBarStyle,
+            onApply: { [weak self] newStyle in
+                guard let self = self else { return }
+                self.menuBarStyle = newStyle
+                self.updateMenuBarAnimation()   // re-evaluates animation + repaints
+                self.closeMenuBarStyleWindow()
+            },
+            onCancel: { [weak self] in self?.closeMenuBarStyleWindow() })
 
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 360),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 560),
                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         win.title = "Menu Bar Style"
         win.isReleasedWhenClosed = false
         win.center()
-        win.contentView = NSHostingView(rootView: MenuBarStyleView(model: model))
+        win.contentView = NSHostingView(rootView: view)
         menuBarStyleWindow = win
         win.makeKeyAndOrderFront(nil)
+    }
+
+    private func closeMenuBarStyleWindow() {
+        menuBarStyleWindow?.close()
+        menuBarStyleWindow = nil   // rebuild from current style on next open
     }
 
     @objc private func showAbout() {

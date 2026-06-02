@@ -44,13 +44,17 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 
 | | |
 |---|---|
-| 💬 **Quick Chat** | A streaming chat window over the Hermes **ACP** protocol. Watch the model's *thinking*, see tool/search activity light up in real time (`🔍 Searching… ✓`), and read the answer as it streams. Multi-turn while open. |
-| 📊 **Usage dashboard** | A vibrant SwiftUI + Swift Charts view of `hermes insights`: stat cards, an input/output token donut, and bar charts for models, weekday activity, top tools, and platforms. |
-| 🚀 **Process control** | Start/stop the TUI (under `caffeinate`), and start/stop/restart the messaging gateway — with live, color-coded status. |
-| 🧠 **Models & profiles** | Save favorite models and one-click switch the persisted default; switch profiles; or open the full interactive picker. |
-| 🪄 **Menu-bar display** | Show the icon, the current model name, or today's token count. The model name supports a **customizable color effect** — rainbow, solid, gradient wave, or pulse — with your own colors, speed, and tightness, edited in a live settings window. |
-| 📨 **Send to Hermes** | A system-wide Services action: select text anywhere → *Services → Send to Hermes* → the reply lands on your clipboard. |
-| 🩺 **At your fingertips** | Run `doctor`, tail logs, check for updates, and open the full web dashboard — straight from the menu. |
+| 🚀 **Launch the TUI, caffeinated** | Start a Hermes TUI session in one click. It runs under macOS **`caffeinate -is`**, so your Mac **won't sleep** while the agent is working — long runs and overnight tasks keep going. Stopping the session lets your Mac sleep normally again. Starting a session also auto-starts the messaging gateway. |
+| 💬 **Quick Chat** | A streaming chat window over the Hermes **ACP** protocol. Watch the model's *thinking*, see tool/search activity light up in real time (`🔍 Searching… ✓`), and read the answer as it streams. Multi-turn while the window is open. |
+| 📊 **Usage dashboard** | A vibrant SwiftUI + Swift Charts view of `hermes insights`: stat cards (sessions, tokens, tool calls, messages, active time), an input/output token donut, and bar charts for models, weekday activity, top tools, and platforms — over Today / 7 days / 30 days. Plus a one-click link to the full **web dashboard**. |
+| 🛰 **Gateway control** | Start / stop / restart the Hermes messaging gateway, see its live status and PID, tail its logs in a terminal, or reveal the logs folder in Finder. |
+| 🔄 **Resume recent sessions** | Jump back into any of your 10 most recent sessions (with last-active time) — each resumes caffeinated, gateway ensured. |
+| 🧠 **Models & profiles** | Save favorite models and one-click switch the persisted default, switch the active profile, or open the full interactive model picker. |
+| 🪄 **Menu-bar display** | Show the icon, the current model name, or today's token count. The model name supports a **customizable color effect** — rainbow, solid, gradient wave, or pulse — with your own colors, speed, and band tightness, edited in a live, in-app settings window. |
+| 📨 **Send to Hermes** | A system-wide **Services** action: select text in *any* app → *Services → Send to Hermes* → the reply is copied to your clipboard with a preview notification. |
+| 📡 **Status at a glance** | A color-coded menu-bar icon plus header rows showing the current model · provider and today's session/token usage — refreshed by 5-second background polling. |
+| 🩺 **Diagnostics & updates** | Run `hermes doctor` (results summarized, full output on failure), and get notified when a new Hermes version is available — install it from the menu. |
+| 🔔 **Native notifications** | macOS notifications when the TUI exits, the gateway stops, an update is available, doctor finishes, or a *Send to Hermes* reply is ready. |
 
 ## 🖼 Screenshots
 
@@ -59,6 +63,30 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 <br/><br/>
 <img src="assets/chat.png" alt="Quick Chat" width="600" />
 </div>
+
+## 🧭 What's in the menu
+
+Click the menu-bar **H** to get:
+
+- **Status** — current model · provider *(read-only)*
+- **Today** — sessions · tokens used today *(read-only)*
+- **● Update available** — appears when a newer Hermes is out; click to install
+- **Quick Chat…** `⌘A` — open the streaming chat window
+- **Gateway ▸** — Status (running/PID) · Restart · Stop · Start · Tail Logs · Reveal Logs in Finder
+- **Profile: \<name\> ▸** — switch the active Hermes profile
+- **Model ▸** — your favorites (one click to switch) · Save Current Model as Favorite · Forget Favorite · Change Model… (full picker)
+- **Run Doctor** — run `hermes doctor` and summarize the results
+- **Usage…** — open the in-app usage dashboard (+ *Open Full Dashboard…*)
+- **Menu Bar Display ▸** — Icon only · Show model · Show today's tokens · **Customize Style…**
+- **Start Hermes** `⌘S` — launch the TUI (caffeinated; auto-starts the gateway)
+- **Stop Hermes** `⌘X` — stop the running TUI session
+- **Resume Session ▸** — your 10 most recent sessions
+- **About HermesLaunch** — app + Hermes versions
+- **Quit** `⌘Q`
+
+**Menu-bar icon states:** ⚪ idle (adapts to light/dark) · 🔵 TUI session running · 🔴 gateway installed but stopped.
+
+**Terminal:** TUI / logs / picker actions open in [Ghostty](https://ghostty.org) if it's installed, otherwise in **Terminal.app** automatically.
 
 ## 📋 Requirements
 
@@ -119,8 +147,8 @@ defaults delete com.hermeslaunch.HermesLaunch   # clears saved preferences
 ## 🤝 Contributing
 
 Issues and PRs welcome. The whole app is a handful of Swift files compiled by `build.sh`
-(`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`, `UsageDashboard.swift`) —
-no project file, no package manager.
+(`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`, `UsageDashboard.swift`,
+`MenuBarStyleSettings.swift`) — no project file, no package manager.
 
 The app icon is generated from code: edit `make_icon.swift`, then run `./make_icons.sh` to
 regenerate the master PNG, the `.iconset`, and `AppIcon.icns`.
