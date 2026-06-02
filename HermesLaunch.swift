@@ -150,6 +150,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // First-run guidance if the Hermes CLI isn't installed/locatable.
         warnIfHermesMissing()
+
+        // First-run, optional nudge to move into /Applications (deferred so the
+        // menu-bar icon appears first).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.offerMoveToApplicationsIfNeeded()
+        }
+    }
+
+    // MARK: - First-run: offer to move into /Applications
+
+    private let moveOfferedKey = "didOfferMoveToApplications"
+
+    private func offerMoveToApplicationsIfNeeded() {
+        let path = Bundle.main.bundlePath
+        // Already in an Applications folder (system or user) → nothing to do.
+        if path.contains("/Applications/") { return }
+        // Only ever ask once — never force anyone's hand.
+        if UserDefaults.standard.bool(forKey: moveOfferedKey) { return }
+        UserDefaults.standard.set(true, forKey: moveOfferedKey)
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Move HermesLaunch to Applications?"
+        alert.informativeText = """
+        HermesLaunch lives in your menu bar. Moving it to your Applications folder keeps it in a \
+        permanent spot (and out of Downloads). You can always do this later by dragging the app yourself.
+        """
+        alert.addButton(withTitle: "Move to Applications")
+        alert.addButton(withTitle: "Not Now")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        moveToApplications()
+    }
+
+    private func moveToApplications() {
+        let fm = FileManager.default
+        let src = Bundle.main.bundleURL
+        let dest = URL(fileURLWithPath: "/Applications").appendingPathComponent(src.lastPathComponent)
+
+        func relaunch(at url: URL) {
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.createsNewApplicationInstance = true
+            NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, _ in
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
+
+        // Don't clobber an existing install — just switch to it.
+        if fm.fileExists(atPath: dest.path) {
+            relaunch(at: dest)
+            return
+        }
+        do {
+            try fm.moveItem(at: src, to: dest)
+            relaunch(at: dest)
+        } catch {
+            // Most likely no write permission to /Applications. Fall back to a
+            // manual drag: reveal the app and open the Applications folder.
+            NSWorkspace.shared.activateFileViewerSelecting([src])
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications"))
+            notify(title: "Couldn’t move automatically",
+                   body: "Drag HermesLaunch into your Applications folder.")
+        }
     }
 
     // MARK: - Menu construction
@@ -568,19 +631,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             none.isEnabled = false
             menu.addItem(none)
             profileItem.title = "Profile: —"
-            return
+        } else {
+            currentProfile = profiles.first(where: { $0.isCurrent })?.name
+            profileItem.title = "Profile: \(currentProfile ?? "—")"
+            for p in profiles {
+                let item = NSMenuItem(title: p.name,
+                                      action: #selector(switchProfile(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.representedObject = p.name
+                item.state = p.isCurrent ? .on : .off
+                menu.addItem(item)
+            }
         }
-        currentProfile = profiles.first(where: { $0.isCurrent })?.name
-        profileItem.title = "Profile: \(currentProfile ?? "—")"
-        for p in profiles {
-            let item = NSMenuItem(title: p.name,
-                                  action: #selector(switchProfile(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.representedObject = p.name
-            item.state = p.isCurrent ? .on : .off
-            menu.addItem(item)
-        }
+        menu.addItem(.separator())
+        let create = NSMenuItem(title: "New Profile…", action: #selector(createProfile), keyEquivalent: "")
+        create.target = self
+        menu.addItem(create)
     }
 
     private func fetchProfiles() -> [ProfileRow] {
@@ -616,6 +683,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusCache = nil
         usageCache = nil
         bumpPoll()
+    }
+
+    @objc private func createProfile() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "New Profile"
+        alert.informativeText = "Name your profile (lowercase letters and numbers). Each profile keeps its own config, skills, and history."
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 26, width: 260, height: 24))
+        field.placeholderString = "e.g. research"
+        let clone = NSButton(checkboxWithTitle: "Clone settings from current profile", target: nil, action: nil)
+        clone.frame = NSRect(x: 0, y: 0, width: 260, height: 18)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 50))
+        container.addSubview(field)
+        container.addSubview(clone)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // Sanitize to the CLI's requirement: lowercase alphanumeric.
+        let name = field.stringValue.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        guard !name.isEmpty else {
+            notify(title: "Couldn’t create profile", body: "Please enter a name with letters or numbers.")
+            return
+        }
+        if fetchProfiles().contains(where: { $0.name.lowercased() == name }) {
+            notify(title: "Profile already exists", body: "“\(name)” is already a profile.")
+            return
+        }
+        let doClone = (clone.state == .on)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var args = ["profile", "create", name]
+            if doClone { args.append("--clone") }
+            let out = self.captureHermes(args)
+            DispatchQueue.main.async {
+                let created = self.fetchProfiles().contains { $0.name.lowercased() == name }
+                if created {
+                    let body = doClone
+                        ? "“\(name)” created from your current profile — pick it from the Profile menu."
+                        : "“\(name)” created. It has no API keys yet — enable “Clone settings” next time, or run setup."
+                    self.notify(title: "Profile created", body: body)
+                } else {
+                    let msg = out.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.notify(title: "Couldn’t create profile",
+                                body: msg.isEmpty ? "See the terminal for details." : String(msg.prefix(180)))
+                }
+                self.bumpPoll()
+            }
+        }
     }
 
     // MARK: - Model picker (#8)
