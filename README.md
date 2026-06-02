@@ -64,6 +64,23 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 <img src="assets/chat.png" alt="Quick Chat" width="600" />
 </div>
 
+## 🎨 Make it yours
+
+Style the menu-bar model name however you like — **rainbow**, **solid**, a **gradient** through your own colors, or a gentle **pulse** — all from an **in-app color picker with a live preview** (no system color panel, just tap a shade).
+
+<div align="center">
+<table>
+  <tr>
+    <td width="56%"><img src="assets/style-picker.png" alt="In-app menu-bar style editor" width="100%" /></td>
+    <td width="44%"><img src="assets/menubar-styles.png" alt="Menu-bar text styles" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>In-app style editor</b> — swatches, sliders, live preview</sub></td>
+    <td align="center"><sub><b>Four effects</b>, your colors</sub></td>
+  </tr>
+</table>
+</div>
+
 ## 🧭 What's in the menu
 
 Click the menu-bar **H** to get:
