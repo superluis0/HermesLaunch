@@ -35,7 +35,7 @@ let hH = size * 0.46          // height of the H
 let postW = size * 0.115      // width of each vertical post
 let gap = size * 0.165        // inner gap between posts
 let hW = postW * 2 + gap      // total H width
-let cx = size * 0.46
+let cx = size * 0.50
 let cy = size * 0.50
 let left = cx - hW / 2
 let bottom = cy - hH / 2
@@ -60,49 +60,6 @@ hPath.append(roundedRect(NSRect(x: left + postW + gap, y: bottom, width: postW, 
 hPath.append(roundedRect(NSRect(x: left, y: cy - crossH / 2, width: hW, height: crossH)))         // crossbar
 glyphColor.setFill()
 hPath.fill()
-
-// ---- Wing fanning off the top-right shoulder ----
-NSShadow().set()  // clear shadow for crisp wing
-glyphColor.setFill()
-
-// All feathers fan from a common origin just above the right post's top.
-let originX = left + postW + gap + postW * 0.85
-let originY = bottom + hH - postW * 0.35
-
-// Curved, tapered feathers: long leading feather at the bottom, shorter toward the top.
-struct Feather { let len: CGFloat; let angleDeg: CGFloat; let baseHalf: CGFloat; let curl: CGFloat }
-let feathers = [
-    Feather(len: size * 0.350, angleDeg: 13, baseHalf: size * 0.058, curl: size * 0.055),
-    Feather(len: size * 0.300, angleDeg: 23, baseHalf: size * 0.055, curl: size * 0.048),
-    Feather(len: size * 0.246, angleDeg: 34, baseHalf: size * 0.050, curl: size * 0.040),
-    Feather(len: size * 0.185, angleDeg: 46, baseHalf: size * 0.044, curl: size * 0.032),
-]
-for f in feathers {
-    let a = f.angleDeg * .pi / 180
-    let dx = cos(a), dy = sin(a)
-    let nx = -sin(a), ny = cos(a)            // unit normal (points "up/left" of the blade)
-    let bx = originX, by = originY            // base center
-    // Tip, with an upward curl perpendicular to the blade direction.
-    let tx = bx + dx * f.len + nx * f.curl
-    let ty = by + dy * f.len + ny * f.curl
-    let h = f.baseHalf
-    let mid = CGFloat(0.5)
-    // Leading edge (outer) bows out; trailing edge (inner) bows in — meeting at a point.
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: bx + nx * h, y: by + ny * h))
-    path.curve(to: NSPoint(x: tx, y: ty),
-               controlPoint1: NSPoint(x: bx + dx * f.len * mid + nx * (h + f.curl * 0.6),
-                                      y: by + dy * f.len * mid + ny * (h + f.curl * 0.6)),
-               controlPoint2: NSPoint(x: tx - dx * f.len * 0.18 + nx * h * 0.3,
-                                      y: ty - dy * f.len * 0.18 + ny * h * 0.3))
-    path.curve(to: NSPoint(x: bx - nx * h, y: by - ny * h),
-               controlPoint1: NSPoint(x: tx - dx * f.len * 0.18 - nx * h * 0.3,
-                                      y: ty - dy * f.len * 0.18 - ny * h * 0.3),
-               controlPoint2: NSPoint(x: bx + dx * f.len * mid - nx * (h * 0.2),
-                                      y: by + dy * f.len * mid - ny * (h * 0.2)))
-    path.close()
-    path.fill()
-}
 
 canvas.unlockFocus()
 

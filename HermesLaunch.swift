@@ -386,40 +386,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Monochrome winged-"H" menu-bar glyph (template image, tinted via contentTintColor).
-    /// A simplified mark — a clean H plus two short wing strokes — that reads at ~18px.
+    /// Monochrome "H" menu-bar glyph (template image, tinted via contentTintColor).
     private static let brandGlyph: NSImage = {
         let s: CGFloat = 18
         let img = NSImage(size: NSSize(width: s, height: s))
         img.lockFocus()
         NSColor.black.setFill()
 
-        let postW: CGFloat = 3.0, gap: CGFloat = 3.4, hH: CGFloat = 12, crossH: CGFloat = 3.0
+        let postW: CGFloat = 3.2, gap: CGFloat = 3.6, hH: CGFloat = 12.5, crossH: CGFloat = 3.2
         let hW = postW * 2 + gap
-        let left: CGFloat = 2.6
+        let left = (s - hW) / 2          // centered
         let bottom = (s - hH) / 2
-        let r: CGFloat = 0.8
+        let r: CGFloat = 0.9
         func rr(_ rect: NSRect) -> NSBezierPath { NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r) }
         let h = NSBezierPath()
+        h.windingRule = .nonZero
         h.append(rr(NSRect(x: left, y: bottom, width: postW, height: hH)))
         h.append(rr(NSRect(x: left + postW + gap, y: bottom, width: postW, height: hH)))
         h.append(rr(NSRect(x: left, y: s / 2 - crossH / 2, width: hW, height: crossH)))
         h.fill()
-
-        // Two short wing strokes off the top-right shoulder.
-        let ox = left + postW + gap + postW * 0.55
-        let oy = bottom + hH - 1.0
-        NSColor.black.setStroke()
-        for (len, angDeg, th) in [(6.2 as CGFloat, 17.0 as CGFloat, 1.8 as CGFloat),
-                                  (4.4 as CGFloat, 33.0 as CGFloat, 1.6 as CGFloat)] {
-            let a = angDeg * .pi / 180
-            let p = NSBezierPath()
-            p.lineWidth = th
-            p.lineCapStyle = .round
-            p.move(to: NSPoint(x: ox, y: oy))
-            p.line(to: NSPoint(x: ox + cos(a) * len, y: oy + sin(a) * len))
-            p.stroke()
-        }
 
         img.unlockFocus()
         img.isTemplate = true

@@ -82,7 +82,7 @@ Install it for good (and add to Login Items if you like):
 cp -R HermesLaunch.app /Applications/
 ```
 
-HermesLaunch runs as a menu-bar accessory — no Dock icon. Look for the winged **H** mark in your menu bar.
+HermesLaunch runs as a menu-bar accessory — no Dock icon. Look for the **H** mark in your menu bar.
 
 ## ⚙️ Configuration
 
