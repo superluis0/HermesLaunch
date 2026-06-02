@@ -82,7 +82,7 @@ Install it for good (and add to Login Items if you like):
 cp -R HermesLaunch.app /Applications/
 ```
 
-HermesLaunch runs as a menu-bar accessory — no Dock icon. Look for the ✈️ paper-plane in your menu bar.
+HermesLaunch runs as a menu-bar accessory — no Dock icon. Look for the winged **H** mark in your menu bar.
 
 ## ⚙️ Configuration
 
@@ -121,6 +121,9 @@ defaults delete com.hermeslaunch.HermesLaunch   # clears saved preferences
 Issues and PRs welcome. The whole app is a handful of Swift files compiled by `build.sh`
 (`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`, `UsageDashboard.swift`) —
 no project file, no package manager.
+
+The app icon is generated from code: edit `make_icon.swift`, then run `./make_icons.sh` to
+regenerate the master PNG, the `.iconset`, and `AppIcon.icns`.
 
 ## 📄 License
 

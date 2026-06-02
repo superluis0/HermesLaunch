@@ -376,33 +376,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
-        let base: NSImage
-        if let sym = NSImage(systemSymbolName: "paperplane.fill",
-                             accessibilityDescription: "Hermes") {
-            base = sym
-        } else {
-            base = Self.emojiImage("✈")
-        }
-
-        let tint: NSColor?
+        button.image = Self.brandGlyph    // template (winged-H); tints follow contentTintColor
         if gatewayLoaded && !gatewayRunning {
-            tint = .systemRed
+            button.contentTintColor = .systemRed       // gateway loaded but stopped
         } else if tuiRunning {
-            tint = .systemBlue
+            button.contentTintColor = .systemBlue       // TUI running
         } else {
-            tint = nil
-        }
-
-        if let tint = tint {
-            let config = NSImage.SymbolConfiguration(hierarchicalColor: tint)
-            let tinted = base.withSymbolConfiguration(config) ?? base
-            tinted.isTemplate = false
-            button.image = tinted
-        } else {
-            base.isTemplate = true
-            button.image = base
+            button.contentTintColor = nil               // idle → adapts to menu-bar appearance
         }
     }
+
+    /// Monochrome winged-"H" menu-bar glyph (template image, tinted via contentTintColor).
+    /// A simplified mark — a clean H plus two short wing strokes — that reads at ~18px.
+    private static let brandGlyph: NSImage = {
+        let s: CGFloat = 18
+        let img = NSImage(size: NSSize(width: s, height: s))
+        img.lockFocus()
+        NSColor.black.setFill()
+
+        let postW: CGFloat = 3.0, gap: CGFloat = 3.4, hH: CGFloat = 12, crossH: CGFloat = 3.0
+        let hW = postW * 2 + gap
+        let left: CGFloat = 2.6
+        let bottom = (s - hH) / 2
+        let r: CGFloat = 0.8
+        func rr(_ rect: NSRect) -> NSBezierPath { NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r) }
+        let h = NSBezierPath()
+        h.append(rr(NSRect(x: left, y: bottom, width: postW, height: hH)))
+        h.append(rr(NSRect(x: left + postW + gap, y: bottom, width: postW, height: hH)))
+        h.append(rr(NSRect(x: left, y: s / 2 - crossH / 2, width: hW, height: crossH)))
+        h.fill()
+
+        // Two short wing strokes off the top-right shoulder.
+        let ox = left + postW + gap + postW * 0.55
+        let oy = bottom + hH - 1.0
+        NSColor.black.setStroke()
+        for (len, angDeg, th) in [(6.2 as CGFloat, 17.0 as CGFloat, 1.8 as CGFloat),
+                                  (4.4 as CGFloat, 33.0 as CGFloat, 1.6 as CGFloat)] {
+            let a = angDeg * .pi / 180
+            let p = NSBezierPath()
+            p.lineWidth = th
+            p.lineCapStyle = .round
+            p.move(to: NSPoint(x: ox, y: oy))
+            p.line(to: NSPoint(x: ox + cos(a) * len, y: oy + sin(a) * len))
+            p.stroke()
+        }
+
+        img.unlockFocus()
+        img.isTemplate = true
+        return img
+    }()
 
     // MARK: - Status snapshot (#4)
 
@@ -1520,15 +1542,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static func truncate(_ s: String, to n: Int) -> String {
         if s.count <= n { return s }
         return String(s.prefix(n - 1)) + "…"
-    }
-
-    private static func emojiImage(_ emoji: String) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14)]
-        (emoji as NSString).draw(at: NSPoint(x: 1, y: 1), withAttributes: attrs)
-        image.unlockFocus()
-        return image
     }
 }
