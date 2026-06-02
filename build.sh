@@ -16,7 +16,7 @@ if [ -f AppIcon.icns ]; then
 fi
 
 swiftc -O -target arm64-apple-macosx13.0 -o "$APP/Contents/MacOS/$BIN" \
-    main.swift HermesLaunch.swift QuickChat.swift ChatView.swift UsageDashboard.swift \
+    main.swift HermesLaunch.swift QuickChat.swift ChatView.swift UsageDashboard.swift MenuBarStyleSettings.swift \
     -framework Cocoa
 
 # Ad-hoc sign so Gatekeeper / TCC can identify the bundle stably for AppleEvents prompt.

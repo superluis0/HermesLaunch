@@ -48,7 +48,7 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 | 📊 **Usage dashboard** | A vibrant SwiftUI + Swift Charts view of `hermes insights`: stat cards, an input/output token donut, and bar charts for models, weekday activity, top tools, and platforms. |
 | 🚀 **Process control** | Start/stop the TUI (under `caffeinate`), and start/stop/restart the messaging gateway — with live, color-coded status. |
 | 🧠 **Models & profiles** | Save favorite models and one-click switch the persisted default; switch profiles; or open the full interactive picker. |
-| 🪄 **Menu-bar display** | Show the icon, the current model name (with an optional **animated rainbow** while running), or today's token count. |
+| 🪄 **Menu-bar display** | Show the icon, the current model name, or today's token count. The model name supports a **customizable color effect** — rainbow, solid, gradient wave, or pulse — with your own colors, speed, and tightness, edited in a live settings window. |
 | 📨 **Send to Hermes** | A system-wide Services action: select text anywhere → *Services → Send to Hermes* → the reply lands on your clipboard. |
 | 🩺 **At your fingertips** | Run `doctor`, tail logs, check for updates, and open the full web dashboard — straight from the menu. |
 

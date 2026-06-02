@@ -56,16 +56,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var usageWindow: NSWindow?
     private var usageModel: UsageModel?
 
-    // Rainbow "Show model" animation (Feature 4)
-    private var rainbowTimer: Timer?
-    private var rainbowPhase: CGFloat = 0
+    // Customizable "Show model" text effect (Feature 8)
+    private var menuBarFXTimer: Timer?
+    private var menuBarPhase: Double = 0
     private var menuBarModelText: String?
-    // Tunable constants for the gentle rainbow wave.
-    private let rainbowFPS: TimeInterval = 0.1      // ~10 fps
-    private let rainbowDrift: CGFloat = 0.018       // phase advance per tick
-    private let rainbowSpread: CGFloat = 0.06       // hue step between adjacent chars
-    private let rainbowSaturation: CGFloat = 0.7
-    private let rainbowBrightness: CGFloat = 0.95
+    private let menuBarFPS: TimeInterval = 0.1      // ~10 fps animation tick
+    private var menuBarStyleWindow: NSWindow?
+    private var menuBarStyleModel: MenuBarStyleModel?
+
+    private let menuBarStyleKey = "menuBarStyle"
+    private var menuBarStyle: MenuBarStyle {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: menuBarStyleKey),
+                  let s = try? JSONDecoder().decode(MenuBarStyle.self, from: data) else { return MenuBarStyle() }
+            return s
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: menuBarStyleKey)
+            }
+        }
+    }
 
     // MARK: - Menu-bar display mode
     private enum MenuBarDisplay: String {
@@ -229,6 +240,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         displayTokensItem.representedObject = MenuBarDisplay.tokens.rawValue
         displayMenu.addItem(displayTokensItem)
 
+        displayMenu.addItem(.separator())
+        let customize = NSMenuItem(title: "Customize Style…",
+                                   action: #selector(openMenuBarStyle), keyEquivalent: "")
+        customize.target = self
+        displayMenu.addItem(customize)
+
         menuBarDisplayItem.submenu = displayMenu
         menu.addItem(menuBarDisplayItem)
 
@@ -354,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateMenuEnabled()
         updateIcon()
-        updateRainbowAnimation()
+        updateMenuBarAnimation()
     }
 
     private func updateMenuEnabled() {
@@ -626,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if mode == .icon {
             statusItem.button?.title = ""
             menuBarModelText = nil
-            updateRainbowAnimation()   // stops the wave timer if it was running
+            updateMenuBarAnimation()   // stops the wave timer if it was running
             return
         }
 
@@ -635,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuBarTextTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
             self?.refreshMenuBarText()
         }
-        updateRainbowAnimation()
+        updateMenuBarAnimation()
     }
 
     private func refreshMenuBarText() {
@@ -664,7 +681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if mode == .model {
                     self.menuBarModelText = text
                     self.renderMenuBarTitle()
-                    self.updateRainbowAnimation()
+                    self.updateMenuBarAnimation()
                 } else {
                     self.menuBarModelText = nil
                     self.statusItem.button?.title = text
@@ -680,54 +697,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return nil
     }
 
-    // MARK: - Rainbow "Show model" text (Feature 4)
+    // MARK: - "Show model" text effect (Feature 8)
 
-    /// Single place that paints the menu-bar title in `.model` mode:
-    /// animated rainbow while the TUI runs, plain template text otherwise.
+    /// Should the effect paint (vs plain text) right now?
+    private var menuBarStyled: Bool {
+        menuBarDisplay == .model && menuBarModelText != nil
+            && (tuiRunning || !menuBarStyle.onlyWhileRunning)
+    }
+
+    /// Single place that paints the menu-bar title in `.model` mode.
     private func renderMenuBarTitle() {
         guard let button = statusItem.button else { return }
         guard menuBarDisplay == .model, let text = menuBarModelText else { return }
-        if tuiRunning {
-            button.attributedTitle = rainbowString(text, phase: rainbowPhase)
+        if menuBarStyled {
+            button.attributedTitle = styledString(text, phase: menuBarPhase)
         } else {
-            button.title = text
+            button.title = text   // plain (adapts to light/dark)
         }
     }
 
-    private func rainbowString(_ text: String, phase: CGFloat) -> NSAttributedString {
+    private func styledString(_ text: String, phase: Double) -> NSAttributedString {
+        let style = menuBarStyle
+        let palette = style.palette
         let attr = NSMutableAttributedString(string: text)
-        let font = NSFont.menuBarFont(ofSize: 0)
-        attr.addAttribute(.font, value: font, range: NSRange(location: 0, length: attr.length))
+        attr.addAttribute(.font, value: NSFont.menuBarFont(ofSize: 0),
+                          range: NSRange(location: 0, length: attr.length))
         let chars = Array(text)
         for i in chars.indices {
-            var hue = (phase + CGFloat(i) * rainbowSpread).truncatingRemainder(dividingBy: 1.0)
-            if hue < 0 { hue += 1.0 }
-            let color = NSColor(hue: hue,
-                                saturation: rainbowSaturation,
-                                brightness: rainbowBrightness,
-                                alpha: 1.0)
-            attr.addAttribute(.foregroundColor, value: color, range: NSRange(location: i, length: 1))
+            let rgba = MenuBarFX.rgba(style: style.style, palette: palette,
+                                      index: i, count: chars.count,
+                                      phase: phase, tightness: style.tightness)
+            attr.addAttribute(.foregroundColor, value: MenuBarFX.nsColor(rgba),
+                              range: NSRange(location: i, length: 1))
         }
         return attr
     }
 
-    /// Starts/stops the wave timer based on the current mode + TUI state.
-    private func updateRainbowAnimation() {
-        let shouldRun = (menuBarDisplay == .model) && tuiRunning
+    /// Starts/stops the animation timer based on mode, style, and TUI state.
+    private func updateMenuBarAnimation() {
+        let style = menuBarStyle
+        let needsAnim = MenuBarFX.needsAnimation(style.style, speed: style.speed)
+        let shouldRun = menuBarStyled && needsAnim
         if shouldRun {
-            if rainbowTimer == nil {
-                rainbowTimer = Timer.scheduledTimer(withTimeInterval: rainbowFPS, repeats: true) { [weak self] _ in
+            if menuBarFXTimer == nil {
+                let drift = MenuBarFX.drift(forSpeed: style.speed)
+                menuBarFXTimer = Timer.scheduledTimer(withTimeInterval: menuBarFPS, repeats: true) { [weak self] _ in
                     guard let self = self else { return }
-                    self.rainbowPhase -= self.rainbowDrift   // negative → wave flows left→right
-                    if self.rainbowPhase < 0 { self.rainbowPhase += 1.0 }
+                    self.menuBarPhase = MenuBarFX.frac(self.menuBarPhase - drift)  // flows left→right
                     self.renderMenuBarTitle()
                 }
             }
         } else {
-            rainbowTimer?.invalidate()
-            rainbowTimer = nil
-            renderMenuBarTitle()   // revert to plain text if still in .model mode
+            menuBarFXTimer?.invalidate()
+            menuBarFXTimer = nil
+            renderMenuBarTitle()   // paint static style / plain text once
         }
+    }
+
+    @objc private func openMenuBarStyle() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = menuBarStyleWindow {
+            w.makeKeyAndOrderFront(nil)
+            return
+        }
+        let model = MenuBarStyleModel(style: menuBarStyle)
+        model.onChange = { [weak self] newStyle in
+            guard let self = self else { return }
+            self.menuBarStyle = newStyle
+            self.updateMenuBarAnimation()   // re-evaluates animation + repaints
+        }
+        menuBarStyleModel = model
+
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 360),
+                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        win.title = "Menu Bar Style"
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: MenuBarStyleView(model: model))
+        menuBarStyleWindow = win
+        win.makeKeyAndOrderFront(nil)
     }
 
     @objc private func showAbout() {
