@@ -1244,10 +1244,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Hermes TUI actions
 
     @objc private func startHermes() {
-        ensureGatewayRunning()
-        runInTerminal(["/usr/bin/caffeinate", "-is", hermesPath, "--tui"])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.pollState()
+        // Pre-flight: confirm the hermes binary is actually runnable before opening a
+        // terminal. The wrapper at ~/.local/bin/hermes execs a venv binary that briefly
+        // disappears while `hermes update` rebuilds it — launching during that window
+        // just flashes a dead terminal. Run the check off the main thread in case the
+        // child hangs mid-rebuild.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let version = self.captureHermes(["--version"])
+            let ready = version.localizedCaseInsensitiveContains("hermes")
+            DispatchQueue.main.async {
+                guard ready else {
+                    self.notify(title: "Hermes isn’t ready yet",
+                                body: "It may still be updating. Try Start Hermes again in a moment.")
+                    return
+                }
+                self.ensureGatewayRunning()
+                self.runInTerminal(["/usr/bin/caffeinate", "-is", self.hermesPath, "--tui"])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.pollState()
+                }
+            }
         }
     }
 
@@ -1501,19 +1518,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// otherwise falls back to Terminal.app via a temporary executable `.command`
     /// script — so it works on any Mac without extra setup.
     private func runInTerminal(_ command: [String]) {
+        // Wrap the command so the window stays open if it exits non-zero — otherwise a
+        // failure (e.g. hermes mid-update) makes the terminal vanish before the user can
+        // read the error, which looks like "nothing happened".
+        let cmd = command.map { Self.shellQuote($0) }.joined(separator: " ")
+        let line = "\(cmd) || { ec=$?; echo; echo \"[hermes exited with status $ec — press Return to close]\"; read _; }"
+
         if ghosttyInstalled {
             let p = Process()
             p.launchPath = "/usr/bin/open"
-            p.arguments = ["-na", "Ghostty.app", "--args", "-e"] + command
+            p.arguments = ["-na", "Ghostty.app", "--args", "-e", "/bin/bash", "-c", line]
             do { try p.run() } catch { NSLog("HermesLaunch terminal launch error: \(error)") }
             return
         }
         // Fallback: write a .command script and open it (runs in Terminal.app).
-        let line = command.map { Self.shellQuote($0) }.joined(separator: " ") + "\n"
         let path = (NSTemporaryDirectory() as NSString)
             .appendingPathComponent("hermeslaunch-\(UUID().uuidString).command")
         do {
-            try line.write(toFile: path, atomically: true, encoding: .utf8)
+            try (line + "\n").write(toFile: path, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
             let p = Process()
             p.launchPath = "/usr/bin/open"
