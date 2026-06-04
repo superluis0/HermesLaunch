@@ -517,55 +517,35 @@ struct ToolRow: View {
 
 // MARK: - AppKit host
 
-final class ChatWindowController: NSObject, NSWindowDelegate {
-    private let hermesPath: String
-    private let onClose: () -> Void
-    private var client: ACPClient!
-    private var window: NSWindow!
-    private let vm = ChatViewModel()
+/// A live chat session: owns the ChatViewModel and its ACPClient and wires them
+/// together. Reusable in any container (the unified app's Chat pane embeds it;
+/// it no longer carries its own window).
+final class ChatSession {
+    let vm = ChatViewModel()
+    private let client: ACPClient
+    private var started = false
 
-    init(hermesPath: String, onClose: @escaping () -> Void) {
-        self.hermesPath = hermesPath
-        self.onClose = onClose
-        super.init()
-    }
+    /// Called when the agent reports a session title (for a window/pane label).
+    var onTitle: ((String) -> Void)?
 
-    func show() {
-        if window == nil { build() }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    private func build() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 720),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                          backing: .buffered, defer: false)
-        window.title = "Hermes Chat"
-        window.minSize = NSSize(width: 460, height: 460)
-        window.delegate = self
-        window.isReleasedWhenClosed = false
-        window.center()
-        window.contentView = NSHostingView(rootView: ChatView(vm: vm))
-
+    init(hermesPath: String) {
         client = ACPClient(hermesPath: hermesPath)
         vm.onSend = { [weak self] t, imgs in self?.client.send(t, images: imgs) }
         vm.onStop = { [weak self] in self?.client.cancel() }
         vm.onSetModel = { [weak self] id in self?.client.setModel(id) }
 
-        client.onStatus      = { [weak self] s in self?.vm.setStatus(s) }
-        client.onThought     = { [weak self] t in self?.vm.appendThought(t) }
-        client.onAnswer      = { [weak self] t in self?.vm.appendAnswer(t) }
-        client.onToolStart   = { [weak self] id, kind, title in self?.vm.addTool(id: id, kind: kind, title: title) }
-        client.onToolUpdate  = { [weak self] id, status in self?.vm.updateTool(id: id, status: status) }
-        client.onSessionTitle = { [weak self] t in self?.window.title = "Hermes — \(t)" }
+        client.onStatus       = { [weak self] s in self?.vm.setStatus(s) }
+        client.onThought      = { [weak self] t in self?.vm.appendThought(t) }
+        client.onAnswer       = { [weak self] t in self?.vm.appendAnswer(t) }
+        client.onToolStart    = { [weak self] id, kind, title in self?.vm.addTool(id: id, kind: kind, title: title) }
+        client.onToolUpdate   = { [weak self] id, status in self?.vm.updateTool(id: id, status: status) }
+        client.onSessionTitle = { [weak self] t in self?.onTitle?(t) }
         client.onTurnComplete = { [weak self] _ in self?.vm.finishTurn() }
-        client.onModels      = { [weak self] models, current in self?.vm.models = models; self?.vm.currentModel = current }
-        client.onCommands    = { [weak self] cmds in self?.vm.commands = cmds }
-        client.start()
+        client.onModels       = { [weak self] models, current in self?.vm.models = models; self?.vm.currentModel = current }
+        client.onCommands     = { [weak self] cmds in self?.vm.commands = cmds }
     }
 
-    func windowWillClose(_ notification: Notification) {
-        client?.shutdown()
-        onClose()
-    }
+    /// Connect to `hermes acp` (idempotent).
+    func start() { guard !started else { return }; started = true; client.start() }
+    func shutdown() { client.shutdown() }
 }

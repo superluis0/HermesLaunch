@@ -25,6 +25,7 @@ let package = Package(
             exclude: [
                 "make_icon.swift",
                 "make_icons.sh",
+                "make_screenshots.sh",
                 "build.sh",
                 "Info.plist",
                 "README.md",

@@ -53,32 +53,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var updateTimer: Timer?
     private var menuBarTextTimer: Timer?
 
-    // Model submenu + windows (Tier 2 features)
+    // Model submenu
     private var modelItem: NSMenuItem!
-    private var chatController: ChatWindowController?
-    private var usageWindow: NSWindow?
-    private var usageModel: UsageModel?
-    private var cronWindow: NSWindow?
-    private var cronModel: CronModel?
-    private var sessionsWindow: NSWindow?
-    private var sessionsModel: SessionsModel?
-    private var logWindow: NSWindow?
-    private var logModel: LogModel?
-    private var skillsWindow: NSWindow?
-    private var skillsModel: SkillsModel?
+
+    // Unified app window (all features live here as sidebar panes)
+    private var mainWindow: MainWindowController?
 
     // Command palette (global summon + inline AI)
     private var palette: PaletteController?
     private var speakRepliesItem: NSMenuItem?
     private var cachedDynamicCommands: [PaletteCommand] = []
-
-    // Agent Cockpit windows (Phase 3)
-    private var kanbanWindow: NSWindow?
-    private var kanbanModel: KanbanModel?
-    private var toolsWindow: NSWindow?
-    private var toolsModel: ToolsMCPModel?
-    private var automationsWindow: NSWindow?
-    private var automationsModel: AutomationsModel?
 
     // Ambient agent activity (Phase 4)
     private var kanbanActivityItem: NSMenuItem?
@@ -187,6 +171,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pal.onWillShow = { [weak self] in self?.refreshDynamicPaletteCommands() }
         pal.registerHotKey()
         palette = pal
+
+        // Unified app window (sidebar shell). Built lazily; opening it promotes the
+        // app to a Dock app, closing it demotes back to a menu-bar accessory.
+        let services = HermesServices(
+            hermesPath: hermesPath,
+            exec: { [weak self] args in self?.captureHermes(args) ?? "" },
+            resume: { [weak self] id in self?.resume(sessionID: id) },
+            openFullDashboard: { [weak self] in self?.openFullDashboard() },
+            usageFetch: { [weak self] days in self?.usageStatsFetch(days: days) ?? UsageStats() },
+            openMenuBarStyle: { [weak self] in self?.openMenuBarStyle() },
+            currentModel: { [weak self] in self?.currentModelSpec() },
+            providerBaseURLs: { [weak self] in self?.knownProviderBaseURLs() ?? [:] },
+            applyModel: { [weak self] model, provider, baseURL in
+                self?.applyModel(model: model, provider: provider, baseURL: baseURL)
+            },
+            openModelWizard: { [weak self] in
+                guard let self else { return }
+                self.runInTerminal([self.hermesPath, "model"])
+            }
+        )
+        mainWindow = MainWindowController(services: services)
+        installMainMenu()
+
+        // Demote back to a menu-bar accessory whenever the last standard (non-panel)
+        // window closes — covers the main window and the Menu-Bar Style editor.
+        NotificationCenter.default.addObserver(self, selector: #selector(anyWindowWillClose(_:)),
+                                               name: NSWindow.willCloseNotification, object: nil)
 
         // URL scheme: hermeslaunch://… for scripting/automation.
         NSAppleEventManager.shared().setEventHandler(
@@ -314,6 +325,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         headerSeparator = NSMenuItem.separator()
         menu.addItem(headerSeparator)
+
+        // Open the unified app window
+        let openAppItem = NSMenuItem(title: "Open HermesLaunch",
+                                     action: #selector(openMainWindow),
+                                     keyEquivalent: "1")
+        openAppItem.target = self
+        menu.addItem(openAppItem)
 
         // Command Palette — global summon (⌥Space) + inline AI
         let paletteMenuItem = NSMenuItem(title: "Command Palette…",
@@ -875,7 +893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Model picker (#8)
 
     @objc private func changeModel() {
-        runInTerminal([hermesPath, "model"])
+        mainWindow?.show(section: .models)
     }
 
     // MARK: - Menu-bar text + About (v5)
@@ -1783,24 +1801,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func switchToFavorite(_ sender: NSMenuItem) {
         guard let fav = sender.representedObject as? FavoriteModel else { return }
+        applyModel(model: fav.model, provider: fav.provider,
+                   baseURL: fav.baseURL.isEmpty ? nil : fav.baseURL, label: fav.label)
+    }
+
+    /// Persist a model selection via `hermes config set` and refresh the UI.
+    /// `provider`/`baseURL` are only written when non-empty (nil baseURL leaves it
+    /// untouched so Hermes resolves it for the provider at runtime).
+    func applyModel(model: String, provider: String, baseURL: String?, label: String? = nil) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            self.runHermes(["config", "set", "model.default", fav.model], wait: true)
-            if !fav.provider.isEmpty {
-                self.runHermes(["config", "set", "model.provider", fav.provider], wait: true)
+            self.runHermes(["config", "set", "model.default", model], wait: true)
+            if !provider.isEmpty {
+                self.runHermes(["config", "set", "model.provider", provider], wait: true)
             }
-            if !fav.baseURL.isEmpty {
-                self.runHermes(["config", "set", "model.base_url", fav.baseURL], wait: true)
+            if let baseURL, !baseURL.isEmpty {
+                self.runHermes(["config", "set", "model.base_url", baseURL], wait: true)
             }
             DispatchQueue.main.async {
-                // Invalidate caches so the header + menu-bar text reflect the new model.
                 self.statusCache = nil
                 self.usageCache = nil
                 self.bumpPoll()
                 self.refreshMenuBarText()
-                self.notify(title: "Model switched", body: fav.label)
+                self.notify(title: "Model switched", body: label ?? model)
             }
         }
+    }
+
+    /// Known base URLs per provider, gathered from the current config + saved
+    /// favorites — lets the in-app picker switch providers without guessing.
+    private func knownProviderBaseURLs() -> [String: String] {
+        var map: [String: String] = [:]
+        if let spec = currentModelSpec(), !spec.provider.isEmpty, !spec.baseURL.isEmpty {
+            map[spec.provider] = spec.baseURL
+        }
+        for fav in favoriteModels where !fav.provider.isEmpty && !fav.baseURL.isEmpty {
+            map[fav.provider] = fav.baseURL
+        }
+        return map
     }
 
     @objc private func forgetFavorite(_ sender: NSMenuItem) {
@@ -1835,12 +1873,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "palette", "":   palette?.summon()
         case "ask":           palette?.summon(query: q, ask: true)
         case "chat":          openChat()
+        case "models", "model": changeModel()
         case "kanban":        openKanban()
         case "tools", "mcp":  openToolsMCP()
         case "automations":   openAutomations()
         case "sessions":      openSessions()
         case "usage":         openUsage()
         case "tasks", "cron": openScheduledTasks()
+        case "skills":        openSkills()
+        case "logs":          openLogs()
+        case "settings":      mainWindow?.show(section: .settings)
         default:              palette?.summon()
         }
     }
@@ -1941,159 +1983,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openChat() {
-        if chatController == nil {
-            chatController = ChatWindowController(hermesPath: hermesPath) { [weak self] in
-                self?.chatController = nil   // released on window close → fresh conversation next time
-            }
-        }
-        chatController?.show()
-    }
+    @objc private func openChat() { mainWindow?.show(section: .chat) }
 
     // MARK: - Scheduled Tasks window (Feature 10 · Phase 1)
 
-    @objc private func openScheduledTasks() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = cronWindow {
-            w.makeKeyAndOrderFront(nil)
-            cronModel?.load()
-            return
-        }
-        let model = CronModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
-        cronModel = model
-
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 560),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Scheduled Tasks — Hermes"
-        win.minSize = NSSize(width: 460, height: 420)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: ScheduledTasksView(model: model))
-        cronWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
+    @objc private func openScheduledTasks() { mainWindow?.show(section: .scheduled) }
 
     // MARK: - Agent Cockpit (Phase 3): Kanban, Tools & MCP, Automations
 
-    @objc private func openKanban() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = kanbanWindow { w.makeKeyAndOrderFront(nil); kanbanModel?.load(); return }
-        let model = KanbanModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
-        kanbanModel = model
-        // Open wide enough to show all 7 columns unfurled (≈1924pt), but never wider
-        // than the screen. Falls back to horizontal scroll on small displays.
-        let fullBoardWidth: CGFloat = 1924
-        let screenWidth = NSScreen.main?.visibleFrame.width ?? 1440
-        let openWidth = min(fullBoardWidth, screenWidth - 60)
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: openWidth, height: 640),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Kanban — Hermes"
-        win.minSize = NSSize(width: 820, height: 520)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: KanbanBoardView(model: model))
-        kanbanWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func openToolsMCP() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = toolsWindow { w.makeKeyAndOrderFront(nil); toolsModel?.load(); return }
-        let model = ToolsMCPModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
-        toolsModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Tools & MCP — Hermes"
-        win.minSize = NSSize(width: 560, height: 480)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: ToolsMCPView(model: model))
-        toolsWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func openAutomations() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = automationsWindow { w.makeKeyAndOrderFront(nil); automationsModel?.load(); return }
-        let model = AutomationsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" },
-                                     onManageCron: { [weak self] in self?.openScheduledTasks() })
-        automationsModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Automations — Hermes"
-        win.minSize = NSSize(width: 560, height: 480)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: AutomationsView(model: model))
-        automationsWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
+    @objc private func openKanban()      { mainWindow?.show(section: .kanban) }
+    @objc private func openToolsMCP()    { mainWindow?.show(section: .tools) }
+    @objc private func openAutomations() { mainWindow?.show(section: .automations) }
 
     // MARK: - Sessions browser + Log viewer (Feature 10 · Phase 3)
 
-    @objc private func openSessions() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = sessionsWindow {
-            w.makeKeyAndOrderFront(nil)
-            sessionsModel?.load()
-            return
-        }
-        let model = SessionsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" },
-                                  onResume: { [weak self] id in self?.resume(sessionID: id) })
-        sessionsModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 600),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Sessions — Hermes"
-        win.minSize = NSSize(width: 480, height: 420)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: SessionsView(model: model))
-        sessionsWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
+    @objc private func openSessions() { mainWindow?.show(section: .sessions) }
 
-    @objc private func openLogs() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = logWindow {
-            w.makeKeyAndOrderFront(nil)
-            logModel?.refresh()
-            return
-        }
-        let model = LogModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
-        logModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 560),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Logs — Hermes"
-        win.minSize = NSSize(width: 520, height: 360)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: LogView(model: model))
-        logWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func openSkills() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = skillsWindow { w.makeKeyAndOrderFront(nil); return }
-        let model = SkillsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
-        skillsModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Skills — Hermes"
-        win.minSize = NSSize(width: 520, height: 420)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView: SkillsView(model: model))
-        skillsWindow = win
-        win.makeKeyAndOrderFront(nil)
-    }
+    @objc private func openLogs()   { mainWindow?.show(section: .logs) }
+    @objc private func openSkills() { mainWindow?.show(section: .skills) }
 
     // MARK: - Quick Send + Backup / Restore (Feature 10 · Phase 2)
 
@@ -2220,32 +2127,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Usage window (Tier 2 #6)
 
-    @objc private func openUsage() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let w = usageWindow {
-            w.makeKeyAndOrderFront(nil)
-            usageModel?.load()
-            return
+    @objc private func openUsage() { mainWindow?.show(section: .usage) }
+
+    /// Parse `hermes insights --days N` into UsageStats (shared by the Usage pane).
+    private func usageStatsFetch(days: Int) -> UsageStats {
+        Self.usageStats(from: Self.parseInsightsFull(captureHermes(["insights", "--days", String(days)])))
+    }
+
+    @objc private func openMainWindow() { mainWindow?.show() }
+
+    /// When the last standard window closes, drop the Dock icon (back to accessory).
+    @objc private func anyWindowWillClose(_ note: Notification) {
+        let closing = note.object as? NSWindow
+        DispatchQueue.main.async {
+            let standardStillOpen = NSApp.windows.contains { w in
+                w !== closing && w.isVisible && !(w is NSPanel) && w.styleMask.contains(.titled)
+            }
+            if !standardStillOpen { NSApp.setActivationPolicy(.accessory) }
         }
+    }
 
-        let model = UsageModel(fetch: { [weak self] days in
-            guard let self = self else { return UsageStats() }
-            let out = self.captureHermes(["insights", "--days", String(days)])
-            return Self.usageStats(from: Self.parseInsightsFull(out))
-        })
-        usageModel = model
+    /// Install a minimal app menu so standard shortcuts (⌘C/⌘V/⌘W/⌘Q/⌘M) work in
+    /// the main window when the app is promoted to `.regular`.
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
 
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 700),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Usage — Hermes"
-        win.minSize = NSSize(width: 540, height: 520)
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.contentView = NSHostingView(rootView:
-            UsageDashboardView(model: model, onOpenFull: { [weak self] in self?.openFullDashboard() }))
-        usageWindow = win
-        win.makeKeyAndOrderFront(nil)
+        let appItem = NSMenuItem(); mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About HermesLaunch", action: #selector(showAbout), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide HermesLaunch", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit HermesLaunch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+
+        let editItem = NSMenuItem(); mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
+        let viewItem = NSMenuItem(); mainMenu.addItem(viewItem)
+        let viewMenu = NSMenu(title: "View")
+        let pal = viewMenu.addItem(withTitle: "Command Palette…", action: #selector(openPalette), keyEquivalent: "k")
+        pal.target = self
+        viewItem.submenu = viewMenu
+
+        let windowItem = NSMenuItem(); mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
     }
 
     @objc private func openFullDashboard() {

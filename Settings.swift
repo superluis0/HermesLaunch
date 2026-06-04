@@ -58,6 +58,17 @@ final class AppSettings: ObservableObject {
         set { store("voicePrefs", newValue) }
     }
 
+    // MARK: Brand color (sidebar mark + app accent); nil = default violet→pink
+
+    var brandColorHex: String? {
+        get { defaults.string(forKey: "brandColorHex") }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "brandColorHex") }
+            else { defaults.removeObject(forKey: "brandColorHex") }
+            objectWillChange.send()
+        }
+    }
+
     // MARK: Command palette history (recent command ids / queries)
 
     var paletteHistory: [String] {

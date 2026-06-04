@@ -39,9 +39,13 @@ capture() {  # capture <url-action> <output-name>
     echo "✓ assets/$2.png"
 }
 
-capture palette     command-palette
-capture kanban      kanban
-capture tools       tools-mcp
-capture automations automations
+capture chat     app-chat
+capture models   app-models
+capture usage    app-usage
+capture kanban   app-kanban
+capture tools    app-tools
+capture settings app-settings
+capture palette  command-palette
 
 echo "Done. If images are blank, grant Screen Recording to your terminal and re-run."
+echo "Tip: the Kanban shot looks best with a few demo tasks created first."

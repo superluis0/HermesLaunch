@@ -126,7 +126,7 @@ struct ScheduledTasksView: View {
                 }
             }
         }
-        .frame(width: 540, height: 560)
+        .frame(minWidth: 460, minHeight: 420)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.load() }
         .sheet(isPresented: $showNew) { NewTaskSheet(model: model, isPresented: $showNew) }

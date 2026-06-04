@@ -132,7 +132,7 @@ struct SkillsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
             }
         }
-        .frame(width: 640, height: 600)
+        .frame(minWidth: 520, minHeight: 420)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

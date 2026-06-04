@@ -139,7 +139,7 @@ struct SessionsView: View {
                 }
             }
         }
-        .frame(width: 600, height: 600)
+        .frame(minWidth: 480, minHeight: 420)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.load() }
         .sheet(item: $renaming) { s in renameSheet(s) }

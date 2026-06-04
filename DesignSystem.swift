@@ -9,13 +9,22 @@ import AppKit
 // build from these; existing windows can migrate opportunistically.
 
 enum DS {
-    // Brand gradient: violet → pink (the Hermes accent used across the app).
+    // Brand gradient: violet → pink by default, or a user-chosen tint.
     static let violet = Color(red: 0.55, green: 0.35, blue: 0.96)
     static let pink   = Color(red: 0.93, green: 0.36, blue: 0.62)
-    static var brandGradient: LinearGradient {
-        LinearGradient(colors: [violet, pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+    /// User's custom brand color, if set (drives the sidebar mark + accents app-wide).
+    static var customBrand: Color? {
+        guard let hex = AppSettings.shared.brandColorHex else { return nil }
+        return Color(hex: hex)
     }
-    static var accent: Color { violet }
+    static var brandGradient: LinearGradient {
+        if let c = customBrand {
+            return LinearGradient(colors: [c, c.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        return LinearGradient(colors: [violet, pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    static var accent: Color { customBrand ?? violet }
 
     // Semantic colors.
     static let success = Color(red: 0.30, green: 0.78, blue: 0.47)
@@ -166,4 +175,28 @@ extension ButtonStyle where Self == HLPrimaryButtonStyle {
 }
 extension ButtonStyle where Self == HLSecondaryButtonStyle {
     static var hlSecondary: HLSecondaryButtonStyle { HLSecondaryButtonStyle() }
+}
+
+// MARK: - Color hex helpers
+
+extension Color {
+    /// Parse "#RRGGBB" (or "RRGGBB"). Returns nil on malformed input.
+    init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = Int(s, radix: 16) else { return nil }
+        self.init(.sRGB,
+                  red: Double((v >> 16) & 0xFF) / 255.0,
+                  green: Double((v >> 8) & 0xFF) / 255.0,
+                  blue: Double(v & 0xFF) / 255.0)
+    }
+
+    /// "#RRGGBB" in sRGB, or nil if the color can't be converted.
+    var hexString: String? {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        return String(format: "#%02X%02X%02X",
+                      Int(round(c.redComponent * 255)),
+                      Int(round(c.greenComponent * 255)),
+                      Int(round(c.blueComponent * 255)))
+    }
 }

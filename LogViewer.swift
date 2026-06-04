@@ -63,7 +63,7 @@ struct LogView: View {
                 .onChange(of: model.text) { proxy.scrollTo("END", anchor: .bottom) }
             }
         }
-        .frame(width: 700, height: 560)
+        .frame(minWidth: 520, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.refresh() }
         .onDisappear { model.stop() }

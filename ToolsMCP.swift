@@ -21,6 +21,31 @@ final class ToolsMCPModel: ObservableObject {
     private let exec: ([String]) -> String
     init(exec: @escaping ([String]) -> String) { self.exec = exec }
 
+    /// Plain-language descriptions for the built-in toolsets (keyed by toolset name).
+    static let descriptions: [String: String] = [
+        "web": "Search the web and scrape page content for up-to-date information.",
+        "browser": "Drive a real browser to navigate, click, and fill out sites.",
+        "terminal": "Run shell commands and manage processes on this machine.",
+        "file": "Read, write, and edit files on disk.",
+        "code_execution": "Execute code in a sandbox and return the results.",
+        "vision": "Analyze images and screenshots.",
+        "video": "Analyze video content.",
+        "image_gen": "Generate images from text prompts.",
+        "video_gen": "Generate video from text prompts.",
+        "x_search": "Search posts and profiles on X (Twitter).",
+        "moa": "Mixture of Agents — blend several models for harder questions.",
+        "tts": "Convert the agent's replies into spoken audio.",
+        "skills": "Load and run installed skills (reusable agent abilities).",
+        "todo": "Plan and track multi-step tasks while working.",
+        "memory": "Persist facts and recall them across future sessions.",
+        "context_engine": "Retrieve relevant context from your indexed knowledge.",
+        "session_search": "Search across your past conversations.",
+        "clarify": "Ask you clarifying questions when a request is ambiguous.",
+        "delegation": "Spin up sub-agents to handle subtasks in parallel.",
+        "cronjob": "Schedule recurring agent jobs.",
+        "messaging": "Send and receive messages across platforms (Telegram, Discord, …).",
+    ]
+
     func load() {
         DispatchQueue.main.async { self.loading = true }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -118,8 +143,14 @@ struct ToolsMCPView: View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             HLSectionHeader(title: "Toolsets", subtitle: "Enable or disable agent capabilities")
             ForEach(model.toolsets) { ts in
-                HStack(spacing: DS.Space.md) {
-                    Text(ts.label).font(DS.Typography.body)
+                HStack(alignment: .top, spacing: DS.Space.md) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ts.label).font(DS.Typography.body)
+                        if let desc = ToolsMCPModel.descriptions[ts.key] {
+                            Text(desc).font(DS.Typography.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     if model.busyKeys.contains(ts.key) { ProgressView().controlSize(.small) }
                     Spacer()
                     Toggle("", isOn: Binding(
@@ -127,7 +158,8 @@ struct ToolsMCPView: View {
                         set: { model.setEnabled(ts.key, $0) }
                     )).labelsHidden().toggleStyle(.switch)
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, DS.Space.xs)
+                Divider().opacity(0.35)
             }
             if model.toolsets.isEmpty {
                 Text("No toolsets reported.").font(DS.Typography.caption).foregroundStyle(.secondary)
