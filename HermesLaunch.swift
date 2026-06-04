@@ -1981,7 +1981,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let w = kanbanWindow { w.makeKeyAndOrderFront(nil); kanbanModel?.load(); return }
         let model = KanbanModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
         kanbanModel = model
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+        // Open wide enough to show all 7 columns unfurled (≈1924pt), but never wider
+        // than the screen. Falls back to horizontal scroll on small displays.
+        let fullBoardWidth: CGFloat = 1924
+        let screenWidth = NSScreen.main?.visibleFrame.width ?? 1440
+        let openWidth = min(fullBoardWidth, screenWidth - 60)
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: openWidth, height: 640),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
         win.title = "Kanban — Hermes"
