@@ -20,10 +20,23 @@
     <string>APPL</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>HermesLaunch uses the microphone for on-device voice dictation and to talk to the Hermes agent. Audio is transcribed locally and never leaves your Mac.</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.hermeslaunch.HermesLaunch</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>hermeslaunch</string>
+            </array>
+        </dict>
+    </array>
     <key>NSServices</key>
     <array>
         <dict>

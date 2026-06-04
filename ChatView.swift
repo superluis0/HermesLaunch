@@ -268,7 +268,7 @@ struct ChatView: View {
                 }
                 .padding(.vertical, 10)
             }
-            .onChange(of: vm.messages.count) { _ in
+            .onChange(of: vm.messages.count) {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("BOTTOM", anchor: .bottom) }
             }
             // Keep pinned to the bottom while content streams in.
@@ -473,7 +473,7 @@ struct TurnView: View {
             }
         }
         // Auto-collapse once thinking is done.
-        .onChange(of: message.thinkingSeconds) { newValue in
+        .onChange(of: message.thinkingSeconds) { _, newValue in
             if newValue != nil { withAnimation(.easeInOut(duration: 0.2)) { expandThinking = false } }
         }
     }

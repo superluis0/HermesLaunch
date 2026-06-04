@@ -121,7 +121,7 @@ struct SkillsView: View {
             }
             .labelsHidden().pickerStyle(.segmented)
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-            .onChange(of: model.tab) { t in if t == .installed && model.installed.isEmpty { model.loadInstalled() } }
+            .onChange(of: model.tab) { _, t in if t == .installed && model.installed.isEmpty { model.loadInstalled() } }
 
             Divider()
             if model.tab == .search { searchTab } else { installedTab }

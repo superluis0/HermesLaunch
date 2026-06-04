@@ -112,7 +112,7 @@ struct UsageDashboardView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 230)
-            .onChange(of: model.days) { _ in model.load() }
+            .onChange(of: model.days) { model.load() }
 
             Button(action: onOpenFull) {
                 Image(systemName: "safari").imageScale(.medium)

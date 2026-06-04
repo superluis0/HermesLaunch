@@ -67,6 +67,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var skillsWindow: NSWindow?
     private var skillsModel: SkillsModel?
 
+    // Command palette (global summon + inline AI)
+    private var palette: PaletteController?
+    private var speakRepliesItem: NSMenuItem?
+    private var cachedDynamicCommands: [PaletteCommand] = []
+
+    // Agent Cockpit windows (Phase 3)
+    private var kanbanWindow: NSWindow?
+    private var kanbanModel: KanbanModel?
+    private var toolsWindow: NSWindow?
+    private var toolsModel: ToolsMCPModel?
+    private var automationsWindow: NSWindow?
+    private var automationsModel: AutomationsModel?
+
+    // Ambient agent activity (Phase 4)
+    private var kanbanActivityItem: NSMenuItem?
+    private var kanbanRunningIds: Set<String> = []
+    private var kanbanTitles: [String: String] = [:]
+    private var kanbanActivityInit = false
+    private var kanbanActivityTimer: Timer?
+
     // Customizable "Show model" text effect (Feature 8)
     private var menuBarFXTimer: Timer?
     private var menuBarPhase: Double = 0
@@ -159,6 +179,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.checkForUpdate()
             self?.checkForLaunchUpdate()
         }
+
+        // Command palette: global summon hotkey (⌥Space) + inline AI.
+        let pal = PaletteController()
+        pal.configure(commands: { [weak self] in self?.makePaletteCommands() ?? [] },
+                      makeACP: { [weak self] in self.map { ACPClient(hermesPath: $0.hermesPath) } })
+        pal.onWillShow = { [weak self] in self?.refreshDynamicPaletteCommands() }
+        pal.registerHotKey()
+        palette = pal
+
+        // URL scheme: hermeslaunch://… for scripting/automation.
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+
+        // Ambient agent-activity poll (running kanban tasks → menu indicator + completion notices).
+        kanbanActivityTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { [weak self] _ in
+            self?.pollKanbanActivity()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.pollKanbanActivity() }
+
+        // First-run onboarding.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboardingIfNeeded() }
 
         // Menu-bar text: restore persisted display mode and start its timer if needed.
         applyMenuBarDisplayMode(initial: true)
@@ -261,8 +303,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launchUpdateItem.isHidden = true
         menu.addItem(launchUpdateItem)
 
+        // Ambient: live agent activity (running kanban tasks)
+        let activityItem = NSMenuItem(title: "▶ Agents working…",
+                                      action: #selector(openKanban),
+                                      keyEquivalent: "")
+        activityItem.target = self
+        activityItem.isHidden = true
+        kanbanActivityItem = activityItem
+        menu.addItem(activityItem)
+
         headerSeparator = NSMenuItem.separator()
         menu.addItem(headerSeparator)
+
+        // Command Palette — global summon (⌥Space) + inline AI
+        let paletteMenuItem = NSMenuItem(title: "Command Palette…",
+                                         action: #selector(openPalette),
+                                         keyEquivalent: "k")
+        paletteMenuItem.target = self
+        menu.addItem(paletteMenuItem)
+
+        // Voice: speak agent replies aloud (local Kokoro TTS)
+        let speakItem = NSMenuItem(title: "Speak Replies",
+                                   action: #selector(toggleSpeakReplies),
+                                   keyEquivalent: "")
+        speakItem.target = self
+        speakItem.state = AppSettings.shared.voice.speakReplies ? .on : .off
+        speakRepliesItem = speakItem
+        menu.addItem(speakItem)
 
         // Quick Chat — live, streaming ACP chat window
         let quickAsk = NSMenuItem(title: "Quick Chat…",
@@ -328,6 +395,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         manageItem.submenu = manageMenu
         menu.addItem(manageItem)
+
+        // Cockpit submenu (Phase 3): Kanban, Tools & MCP, Automations
+        let cockpitItem = NSMenuItem(title: "Cockpit", action: nil, keyEquivalent: "")
+        let cockpitMenu = NSMenu()
+        cockpitMenu.autoenablesItems = false
+        for (title, sel) in [("Kanban Board…", #selector(openKanban)),
+                             ("Tools & MCP…", #selector(openToolsMCP)),
+                             ("Automations…", #selector(openAutomations))] {
+            let i = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            i.target = self
+            cockpitMenu.addItem(i)
+        }
+        cockpitItem.submenu = cockpitMenu
+        menu.addItem(cockpitItem)
 
         // Menu Bar Display submenu
         menuBarDisplayItem = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
@@ -1194,19 +1275,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.launchPath = "/bin/launchctl"
         p.arguments = ["list", gatewayLabel]
         let out = Pipe()
-        let err = Pipe()
         p.standardOutput = out
-        p.standardError = err
+        // Discard stderr to a null device; drain stdout before waiting to avoid a
+        // pipe-buffer deadlock on waitUntilExit().
+        p.standardError = FileHandle.nullDevice
         do {
             try p.run()
-            p.waitUntilExit()
         } catch {
             return GatewayState(loaded: false, running: false, pid: nil, lastExit: nil)
         }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
         if p.terminationStatus != 0 {
             return GatewayState(loaded: false, running: false, pid: nil, lastExit: nil)
         }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
         let text = String(data: data, encoding: .utf8) ?? ""
         var pid: Int? = nil
         var lastExit: Int? = nil
@@ -1485,10 +1567,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         p.arguments = ["-lc", "command -v \(tool)"]
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
-        do { try p.run(); p.waitUntilExit() } catch { return nil }
-        guard p.terminationStatus == 0 else { return nil }
+        // Discard stderr to a null device (an undrained stderr pipe can fill its
+        // buffer on verbose login shells and deadlock waitUntilExit()).
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        // Drain stdout to EOF BEFORE waiting so a large payload can't block the child.
         let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
         let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (path?.isEmpty == false) ? path : nil
     }
@@ -1726,6 +1812,135 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Quick Chat window (Feature 5 — live ACP chat)
 
+    // MARK: - Command palette
+
+    @objc private func openPalette() { palette?.toggle() }
+
+    @objc private func toggleSpeakReplies() {
+        var v = AppSettings.shared.voice
+        v.speakReplies.toggle()
+        AppSettings.shared.voice = v
+        speakRepliesItem?.state = v.speakReplies ? .on : .off
+    }
+
+    // MARK: - URL scheme (hermeslaunch://…)
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
+        guard let str = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: str) else { return }
+        let action = (url.host ?? url.path.replacingOccurrences(of: "/", with: "")).lowercased()
+        let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "q" || $0.name == "text" })?.value
+        switch action {
+        case "palette", "":   palette?.summon()
+        case "ask":           palette?.summon(query: q, ask: true)
+        case "chat":          openChat()
+        case "kanban":        openKanban()
+        case "tools", "mcp":  openToolsMCP()
+        case "automations":   openAutomations()
+        case "sessions":      openSessions()
+        case "usage":         openUsage()
+        case "tasks", "cron": openScheduledTasks()
+        default:              palette?.summon()
+        }
+    }
+
+    // MARK: - Ambient agent activity (running kanban tasks)
+
+    private func pollKanbanActivity() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            guard let tasks = KanbanModel.parse(self.captureHermes(["kanban", "list", "--json"])) else { return }
+            let running = tasks.filter { $0.status == "running" }
+            let runningIds = Set(running.map { $0.id })
+            let doneIds = Set(tasks.filter { $0.status == "done" }.map { $0.id })
+            var titles = self.kanbanTitles
+            for t in tasks { titles[t.id] = t.title }
+            let finished = self.kanbanRunningIds.subtracting(runningIds).intersection(doneIds)
+            DispatchQueue.main.async {
+                if self.kanbanActivityInit {
+                    for id in finished { self.notify(title: "Task completed", body: titles[id] ?? id) }
+                }
+                self.kanbanRunningIds = runningIds
+                self.kanbanTitles = titles
+                self.kanbanActivityInit = true
+                if let item = self.kanbanActivityItem {
+                    item.isHidden = running.isEmpty
+                    item.title = running.count == 1 ? "▶ 1 agent working…" : "▶ \(running.count) agents working…"
+                }
+            }
+        }
+    }
+
+    // MARK: - First-run onboarding
+
+    private let onboardingKey = "didOnboardCockpit"
+
+    private func showOnboardingIfNeeded() {
+        if UserDefaults.standard.bool(forKey: onboardingKey) { return }
+        UserDefaults.standard.set(true, forKey: onboardingKey)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Welcome to HermesLaunch"
+        alert.informativeText = """
+        • Press ⌥Space anywhere to open the Command Palette — search commands or ask Hermes inline.
+        • Click the mic in the palette to dictate locally (Parakeet). Turn on “Speak Replies” to hear answers.
+        • Open Cockpit for the Kanban board, Tools & MCP, and Automations.
+
+        Voice runs on-device; macOS will ask for microphone access the first time you dictate.
+        """
+        alert.addButton(withTitle: "Open Command Palette")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn { palette?.summon() }
+    }
+
+    /// Static commands surfaced in the palette. Each reuses an existing action.
+    private func makePaletteCommands() -> [PaletteCommand] {
+        func cmd(_ id: String, _ title: String, _ image: String,
+                 _ subtitle: String = "", _ run: @escaping () -> Void) -> PaletteCommand {
+            PaletteCommand(id: id, title: title, subtitle: subtitle, systemImage: image, run: run)
+        }
+        let staticCommands = [
+            cmd("chat", "Quick Chat", "bubble.left.and.bubble.right", "Live streaming chat") { [weak self] in self?.openChat() },
+            cmd("start", "Start Hermes", "play.fill", "Launch the TUI in a terminal") { [weak self] in self?.startHermes() },
+            cmd("stop", "Stop Hermes", "stop.fill", "") { [weak self] in self?.stopHermes() },
+            cmd("tasks", "Scheduled Tasks", "calendar.badge.clock", "") { [weak self] in self?.openScheduledTasks() },
+            cmd("sessions", "Sessions", "clock.arrow.circlepath", "Browse & resume conversations") { [weak self] in self?.openSessions() },
+            cmd("skills", "Skills", "puzzlepiece.extension", "") { [weak self] in self?.openSkills() },
+            cmd("logs", "Logs", "doc.text.magnifyingglass", "") { [weak self] in self?.openLogs() },
+            cmd("usage", "Usage Dashboard", "chart.bar.xaxis", "") { [weak self] in self?.openUsage() },
+            cmd("kanban", "Kanban Board", "rectangle.split.3x1.fill", "Watch agents work tasks") { [weak self] in self?.openKanban() },
+            cmd("toolsmcp", "Tools & MCP", "slider.horizontal.3", "Toggle toolsets & MCP servers") { [weak self] in self?.openToolsMCP() },
+            cmd("automations", "Automations", "bolt.badge.clock", "Cron, hooks & webhooks") { [weak self] in self?.openAutomations() },
+            cmd("send", "Quick Send", "paperplane", "") { [weak self] in self?.openQuickSend() },
+            cmd("style", "Menu-Bar Style", "paintpalette", "") { [weak self] in self?.openMenuBarStyle() },
+            cmd("doctor", "Run Doctor", "stethoscope", "Diagnose the Hermes setup") { [weak self] in self?.runDoctor() },
+        ]
+        return staticCommands + cachedDynamicCommands
+    }
+
+    /// Refresh dynamic palette commands (recent sessions) off the main thread,
+    /// then re-rank. Invoked each time the palette is shown.
+    private func refreshDynamicPaletteCommands() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let rows = SessionsModel.parse(self.captureHermes(["sessions", "list", "--limit", "8"]))
+            let commands = rows.prefix(8).map { row in
+                PaletteCommand(id: "resume-\(row.id)",
+                               title: "Resume: \(row.title)",
+                               subtitle: row.lastActive.isEmpty ? "Session \(row.id)" : row.lastActive,
+                               systemImage: "arrow.uturn.backward.circle") { [weak self] in
+                    self?.resume(sessionID: row.id)
+                }
+            }
+            DispatchQueue.main.async {
+                self.cachedDynamicCommands = commands
+                self.palette?.reloadCommands()
+            }
+        }
+    }
+
     @objc private func openChat() {
         if chatController == nil {
             chatController = ChatWindowController(hermesPath: hermesPath) { [weak self] in
@@ -1756,6 +1971,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         win.center()
         win.contentView = NSHostingView(rootView: ScheduledTasksView(model: model))
         cronWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Agent Cockpit (Phase 3): Kanban, Tools & MCP, Automations
+
+    @objc private func openKanban() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = kanbanWindow { w.makeKeyAndOrderFront(nil); kanbanModel?.load(); return }
+        let model = KanbanModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
+        kanbanModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Kanban — Hermes"
+        win.minSize = NSSize(width: 820, height: 520)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: KanbanBoardView(model: model))
+        kanbanWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openToolsMCP() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = toolsWindow { w.makeKeyAndOrderFront(nil); toolsModel?.load(); return }
+        let model = ToolsMCPModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" })
+        toolsModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Tools & MCP — Hermes"
+        win.minSize = NSSize(width: 560, height: 480)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: ToolsMCPView(model: model))
+        toolsWindow = win
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openAutomations() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let w = automationsWindow { w.makeKeyAndOrderFront(nil); automationsModel?.load(); return }
+        let model = AutomationsModel(exec: { [weak self] args in self?.captureHermes(args) ?? "" },
+                                     onManageCron: { [weak self] in self?.openScheduledTasks() })
+        automationsModel = model
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Automations — Hermes"
+        win.minSize = NSSize(width: 560, height: 480)
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.contentView = NSHostingView(rootView: AutomationsView(model: model))
+        automationsWindow = win
         win.makeKeyAndOrderFront(nil)
     }
 

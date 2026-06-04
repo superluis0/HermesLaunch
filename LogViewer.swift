@@ -60,7 +60,7 @@ struct LogView: View {
                         .padding(12)
                         .id("END")
                 }
-                .onChange(of: model.text) { _ in proxy.scrollTo("END", anchor: .bottom) }
+                .onChange(of: model.text) { proxy.scrollTo("END", anchor: .bottom) }
             }
         }
         .frame(width: 700, height: 560)
@@ -75,13 +75,13 @@ struct LogView: View {
                 ForEach(LogModel.logs, id: \.self) { Text($0.capitalized).tag($0) }
             }
             .labelsHidden().frame(width: 120)
-            .onChange(of: model.logName) { _ in model.refresh() }
+            .onChange(of: model.logName) { model.refresh() }
 
             Picker("", selection: $model.level) {
                 ForEach(LogModel.levels, id: \.self) { Text($0).tag($0) }
             }
             .labelsHidden().frame(width: 110)
-            .onChange(of: model.level) { _ in model.refresh() }
+            .onChange(of: model.level) { model.refresh() }
 
             Spacer()
 

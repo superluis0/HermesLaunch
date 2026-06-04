@@ -6,13 +6,13 @@
 
 ### The [Hermes Agent](https://github.com/NousResearch/hermes) — one click away in your menu bar.
 
-Launch the TUI, manage the gateway, **schedule recurring tasks**, switch models, **chat with live streaming thinking & tool activity**, browse sessions & skills, and watch a **beautiful usage dashboard** — all without opening a terminal.
+Summon a **command palette** from anywhere, **talk to the agent** with on-device voice, watch swarm agents work a **live Kanban board**, launch the TUI, schedule recurring tasks, **chat with live streaming thinking & tool activity**, and watch a **beautiful usage dashboard** — all without opening a terminal.
 
 <p>
-  <img alt="Platform" src="https://img.shields.io/badge/macOS-13%2B-111111?style=flat-square&logo=apple&logoColor=white" />
+  <img alt="Platform" src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square&logo=apple&logoColor=white" />
   <img alt="Swift" src="https://img.shields.io/badge/Swift-5-F05138?style=flat-square&logo=swift&logoColor=white" />
   <img alt="UI" src="https://img.shields.io/badge/AppKit%20%2B%20SwiftUI-2563EB?style=flat-square" />
-  <img alt="Dependencies" src="https://img.shields.io/badge/dependencies-none-22C55E?style=flat-square" />
+  <img alt="AI" src="https://img.shields.io/badge/voice-on--device-22C55E?style=flat-square" />
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6?style=flat-square" />
 </p>
 
@@ -37,13 +37,20 @@ Launch the TUI, manage the gateway, **schedule recurring tasks**, switch models,
 
 Hermes is a powerful terminal-native AI agent. HermesLaunch wraps it in a **lightweight, native macOS
 menu-bar app** so the things you do constantly — starting a session, checking usage, asking a quick
-question — are always a click away. It's a single, dependency-free binary (just `swiftc` + the system
-frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift Charts** for the windows.
+question — are always a keystroke away. It's built with AppKit for the menu-bar plumbing and
+**SwiftUI + Swift Charts** for the windows, with on-device voice powered by the
+[FluidAudio](https://github.com/FluidInference/FluidAudio) Swift package (Parakeet ASR + Kokoro TTS,
+running on the Apple Neural Engine) — **no cloud, no API keys**.
 
 ## ✨ Features
 
 | | |
 |---|---|
+| ⌘ **Command palette** | Press **⌥Space** anywhere to summon a Spotlight/Raycast-style palette — fuzzy-search every action (chat, start/stop, schedule, open any window), **resume recent sessions**, or just type a question and press ⏎ for an **inline streaming answer** from Hermes. The cohesion spine of the whole app; also reachable via `hermeslaunch://` URLs. |
+| 🎙 **Local voice** | **Push-to-talk dictation** straight into the palette (click the mic) and optional **spoken replies** — both fully on-device via FluidAudio's Parakeet (speech-to-text) and Kokoro (text-to-speech) CoreML models on the Apple Neural Engine. Private by default; audio never leaves your Mac. |
+| 🗂 **Kanban board** | A native board over `hermes kanban` — **watch swarm agents work tasks in real time** (3-second live refresh), and drive the full lifecycle: create, promote, assign, comment, block/unblock, complete, archive, and **dispatch** agents. |
+| 🎛 **Tools & MCP manager** | Toggle the agent's **toolsets** (web, browser, code execution, vision, memory, …) with a switch, and **add / remove MCP servers** — no `config.yaml` editing. |
+| ⚡ **Automations hub** | One place for event-driven + scheduled activation: **cron** jobs, shell **hooks**, and **webhooks** — see status across all three trigger types. |
 | 🚀 **Launch the TUI, caffeinated** | Start a Hermes TUI session in one click. It runs under macOS **`caffeinate -is`**, so your Mac **won't sleep** while the agent is working — long runs and overnight tasks keep going. Stopping the session lets your Mac sleep normally again. Starting a session also auto-starts the messaging gateway. |
 | 💬 **Quick Chat** | A streaming chat over the Hermes **ACP** protocol — watch the model's *thinking* and tool/search activity in real time (`🔍 Searching… ✓`), then the streamed answer. **Switch models mid-chat**, run **slash commands** (`/reset`, `/compact`, …), and **attach images**. Multi-turn while the window is open. |
 | ⏰ **Scheduled tasks** | Create, run, pause, and delete recurring agent jobs (`hermes cron`) from a panel, with a **visual schedule builder** — Once / Every / Daily / Weekly / Custom-cron — plus a prompt and a delivery target (Telegram/Discord/local). Turns the menu bar into a cockpit for autonomous tasks. |
@@ -60,6 +67,35 @@ frameworks), built with AppKit for the menu-bar plumbing and **SwiftUI + Swift C
 | 📡 **Status at a glance** | A color-coded menu-bar icon plus header rows showing the current model · provider and today's session/token usage — refreshed by 5-second background polling. |
 | 🩺 **Diagnostics & updates** | Run `hermes doctor` (results summarized, full output on failure), and get notified when a new Hermes version is available — install it from the menu. |
 | 🔔 **Native notifications** | macOS notifications when the TUI exits, the gateway stops, an update is available, doctor finishes, or a *Send to Hermes* reply is ready. |
+
+## ⌘ Command palette & voice
+
+Press **⌥Space** from any app. Fuzzy-search commands, resume a recent session, or ask Hermes a
+question and watch the answer stream inline. Click the mic to **dictate locally**, and flip on
+**Speak Replies** to hear the answer — all on-device.
+
+<div align="center">
+<img src="assets/command-palette.png" alt="Command palette with inline AI and voice dictation" width="640" />
+</div>
+
+## 🛰 Agent cockpit
+
+Drive the deeper parts of Hermes — task swarms, toolsets, MCP servers, and automations — from native windows.
+
+<div align="center">
+<table>
+  <tr>
+    <td width="40%"><img src="assets/kanban.png" alt="Kanban board" width="100%" /></td>
+    <td width="30%"><img src="assets/tools-mcp.png" alt="Tools & MCP manager" width="100%" /></td>
+    <td width="30%"><img src="assets/automations.png" alt="Automations hub" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Kanban</b> — watch agents work, live</sub></td>
+    <td align="center"><sub><b>Tools & MCP</b> — toggle capabilities</sub></td>
+    <td align="center"><sub><b>Automations</b> — cron · hooks · webhooks</sub></td>
+  </tr>
+</table>
+</div>
 
 ## 🖼 Screenshots
 
@@ -113,6 +149,9 @@ Click the menu-bar **H** to get:
 - **Today** — sessions · tokens used today *(read-only)*
 - **● Update available** — a newer **Hermes** is out; click to install
 - **● HermesLaunch update available** — new commits on the repo; click to pull, rebuild & relaunch *(only when run from a git clone)*
+- **▶ N agents working…** — appears when Kanban tasks are running; click to open the board *(auto-hidden when idle)*
+- **Command Palette…** `⌘K` *(or **⌥Space** from anywhere)* — fuzzy command search + inline AI + voice dictation
+- **Speak Replies** — toggle on-device spoken answers (Kokoro TTS)
 - **Quick Chat…** `⌘A` — streaming chat (switch model mid-chat · slash commands · attach images)
 - **Gateway ▸** — Status (running/PID) · Restart · Stop · Start · Tail Logs · Reveal Logs in Finder · **Send Message…**
 - **Profile: \<name\> ▸** — switch the active profile · **New Profile…**
@@ -120,6 +159,7 @@ Click the menu-bar **H** to get:
 - **Run Doctor** — run `hermes doctor` and summarize the results
 - **Usage…** — open the in-app usage dashboard (+ *Open Full Dashboard…*)
 - **Manage ▸** — **Scheduled Tasks…** · **Sessions…** · **Skills…** · **Logs…** · **Back Up…** · **Restore from Backup…**
+- **Cockpit ▸** — **Kanban Board…** · **Tools & MCP…** · **Automations…**
 - **Menu Bar Display ▸** — Icon only · Show model · Show today's tokens · **Customize Style…**
 - **Start Hermes** `⌘S` — launch the TUI (caffeinated; auto-starts the gateway)
 - **Stop Hermes** `⌘X` — stop the running TUI session
@@ -133,9 +173,10 @@ Click the menu-bar **H** to get:
 
 ## 📋 Requirements
 
-- **macOS 13 (Ventura) or later** — uses SwiftUI + Swift Charts
-- **Xcode Command Line Tools** — `xcode-select --install` (provides `swiftc`)
-- **The [Hermes Agent](https://github.com/NousResearch/hermes) CLI** on your `PATH` (Quick Chat also uses `hermes acp`)
+- **macOS 14 (Sonoma) or later** — required by the FluidAudio voice engine (CoreML / ANE)
+- **Xcode Command Line Tools** — `xcode-select --install` (provides the Swift toolchain & `swift build`)
+- **The [Hermes Agent](https://github.com/NousResearch/hermes) CLI** on your `PATH` (Quick Chat & the palette also use `hermes acp`)
+- *Optional:* a **microphone** for voice dictation — macOS prompts on first use; transcription is on-device
 - *Optional:* [Ghostty](https://ghostty.org) for terminal actions — falls back to **Terminal.app** automatically
 
 ## 🚀 Quick start
@@ -143,7 +184,7 @@ Click the menu-bar **H** to get:
 ```sh
 git clone https://github.com/superluis0/HermesLaunch.git
 cd HermesLaunch
-./build.sh
+./build.sh            # first run fetches FluidAudio via SwiftPM
 open HermesLaunch.app
 ```
 
@@ -171,13 +212,18 @@ defaults write com.hermeslaunch.HermesLaunch hermesPath /full/path/to/hermes
 ```
 ┌─────────────────────────────┐
 │  Menu bar (AppKit)          │   status polling · profiles · gateway · services
+│   ├─ Command palette        │── ACP JSON-RPC over stdio ──▶  hermes acp   (inline AI)
 │   ├─ Quick Chat   (SwiftUI) │── ACP JSON-RPC over stdio ──▶  hermes acp
-│   └─ Usage board  (SwiftUI) │── parses ───────────────────▶  hermes insights
+│   ├─ Kanban / Tools / Auto  │── shells out ───────────────▶  hermes kanban · tools · mcp · cron …
+│   ├─ Usage board  (SwiftUI) │── parses ───────────────────▶  hermes insights
+│   └─ Voice  (FluidAudio)    │── on-device CoreML / ANE ────▶  Parakeet ASR · Kokoro TTS
 └─────────────────────────────┘            shells out ──────▶  hermes <cmd>
 ```
 
 The app is a thin front-end: it shells out to your `hermes` CLI, which manages its own credentials
-in `~/.hermes`. **No API keys or secrets are stored in this project.**
+in `~/.hermes`. Voice runs entirely on-device via [FluidAudio](https://github.com/FluidInference/FluidAudio)
+(Apache-2.0); its CoreML models download once to `~/Library/Application Support/FluidAudio/`.
+**No API keys or secrets are stored in this project, and audio never leaves your Mac.**
 
 ## 🧹 Uninstall
 
@@ -189,13 +235,18 @@ defaults delete com.hermeslaunch.HermesLaunch   # clears saved preferences
 
 ## 🤝 Contributing
 
-Issues and PRs welcome. The whole app is a handful of Swift files compiled by `build.sh`
-(`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`, `UsageDashboard.swift`,
-`MenuBarStyleSettings.swift`, `ScheduledTasks.swift`, `SessionsBrowser.swift`, `LogViewer.swift`,
-`SkillsBrowser.swift`) — no project file, no package manager.
+Issues and PRs welcome. The app is a set of Swift files built by `build.sh` via **SwiftPM**
+(`swift build -c release`, see `Package.swift`) and then assembled into the `.app` bundle:
+menu bar & windows (`main.swift`, `HermesLaunch.swift`, `QuickChat.swift`, `ChatView.swift`,
+`UsageDashboard.swift`, `MenuBarStyleSettings.swift`, `ScheduledTasks.swift`, `SessionsBrowser.swift`,
+`LogViewer.swift`, `SkillsBrowser.swift`), plus the newer surfaces — `DesignSystem.swift`,
+`Settings.swift`, `CommandPalette.swift`, `Voice.swift`, `KanbanBoard.swift`, `ToolsMCP.swift`,
+`Automations.swift`. The only external dependency is
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (fetched automatically on first build).
 
 The app icon is generated from code: edit `make_icon.swift`, then run `./make_icons.sh` to
-regenerate the master PNG, the `.iconset`, and `AppIcon.icns`.
+regenerate the master PNG, the `.iconset`, and `AppIcon.icns`. README screenshots are captured with
+`./make_screenshots.sh` (needs Screen Recording permission for your terminal).
 
 ## 📄 License
 
