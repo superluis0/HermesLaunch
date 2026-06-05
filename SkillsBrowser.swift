@@ -214,7 +214,7 @@ struct SkillsView: View {
                 }
             }
         }
-        .onAppear { if model.installed.isEmpty { model.loadInstalled() } }
+        .onAppear { model.loadInstalled() }   // refresh on each visit (model is retained by the shell)
     }
 
     private func badge(_ text: String, color: Color) -> some View {

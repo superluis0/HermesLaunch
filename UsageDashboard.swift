@@ -93,7 +93,7 @@ struct UsageDashboardView: View {
         }
         .frame(minWidth: 540, minHeight: 540)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { if model.stats == nil { model.load() } }
+        .onAppear { model.load() }   // refresh each time the pane is shown (model is retained by the shell)
     }
 
     private var header: some View {
