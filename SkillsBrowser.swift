@@ -133,7 +133,7 @@ struct SkillsView: View {
             }
         }
         .frame(minWidth: 520, minHeight: 420)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
     }
 
     private var searchTab: some View {

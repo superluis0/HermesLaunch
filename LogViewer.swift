@@ -64,7 +64,7 @@ struct LogView: View {
             }
         }
         .frame(minWidth: 520, minHeight: 360)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.refresh() }
         .onDisappear { model.stop() }
     }

@@ -9,27 +9,45 @@ import AppKit
 // build from these; existing windows can migrate opportunistically.
 
 enum DS {
-    // Brand gradient: violet → pink by default, or a user-chosen tint.
+    /// The active palette, resolved from the user's chosen theme. Re-read on every
+    /// access so any view using a DS token repaints live when the theme changes
+    /// (AppSettings fires objectWillChange; observers re-evaluate these computed vars).
+    static var theme: ThemePalette {
+        (HLTheme(rawValue: AppSettings.shared.themeId) ?? .fallback).palette
+    }
+
+    // Legacy brand constants (kept for any remaining direct references).
     static let violet = Color(red: 0.55, green: 0.35, blue: 0.96)
     static let pink   = Color(red: 0.93, green: 0.36, blue: 0.62)
 
-    /// User's custom brand color, if set (drives the sidebar mark + accents app-wide).
-    static var customBrand: Color? {
-        guard let hex = AppSettings.shared.brandColorHex else { return nil }
-        return Color(hex: hex)
+    // Accent + brand gradient — now sourced from the active theme.
+    static var accent: Color { theme.accent }
+
+    /// Readable text/icon color to place *on top of* the accent (handles light
+    /// accents like Mono's near-white, where white-on-accent would be invisible).
+    static var onAccent: Color {
+        let c = NSColor(theme.accent).usingColorSpace(.sRGB)
+        let lum = c.map { 0.2126 * $0.redComponent + 0.7152 * $0.greenComponent + 0.0722 * $0.blueComponent } ?? 0
+        return lum > 0.6 ? Color.black.opacity(0.85) : .white
     }
     static var brandGradient: LinearGradient {
-        if let c = customBrand {
-            return LinearGradient(colors: [c, c.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-        return LinearGradient(colors: [violet, pink], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: [theme.accent, theme.accent2],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    static var accent: Color { customBrand ?? violet }
 
-    // Semantic colors.
-    static let success = Color(red: 0.30, green: 0.78, blue: 0.47)
-    static let warning = Color(red: 0.98, green: 0.71, blue: 0.20)
-    static let danger  = Color(red: 0.94, green: 0.34, blue: 0.38)
+    // Surfaces & text (themed).
+    static var bg: Color              { theme.bg }
+    static var surface: Color         { theme.surface }
+    static var surfaceElevated: Color { theme.surfaceElevated }
+    static var border: Color          { theme.border }
+    static var textPrimary: Color     { theme.textPrimary }
+    static var textSecondary: Color   { theme.textSecondary }
+    static var textTertiary: Color    { theme.textTertiary }
+
+    // Semantic status colors (themed).
+    static var success: Color { theme.success }
+    static var warning: Color { theme.warning }
+    static var danger: Color  { theme.danger }
 
     // Typography scale (matches the sizes already used across windows).
     enum Typography {
@@ -107,11 +125,11 @@ struct HLCard<Content: View>: View {
             .padding(DS.Space.md)
             .background(
                 RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(DS.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06))
+                    .strokeBorder(DS.border.opacity(0.6))
             )
     }
 }
@@ -152,7 +170,7 @@ struct HLPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, DS.Space.lg)
             .padding(.vertical, DS.Space.sm)
             .background(DS.brandGradient.opacity(configuration.isPressed ? 0.8 : 1))
-            .foregroundStyle(.white)
+            .foregroundStyle(DS.onAccent)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(DS.Motion.quick, value: configuration.isPressed)
@@ -165,7 +183,8 @@ struct HLSecondaryButtonStyle: ButtonStyle {
             .font(DS.Typography.body)
             .padding(.horizontal, DS.Space.md)
             .padding(.vertical, DS.Space.sm)
-            .background(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.06))
+            .background(DS.textPrimary.opacity(configuration.isPressed ? 0.16 : 0.08))
+            .foregroundStyle(DS.textPrimary)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
     }
 }
@@ -175,6 +194,22 @@ extension ButtonStyle where Self == HLPrimaryButtonStyle {
 }
 extension ButtonStyle where Self == HLSecondaryButtonStyle {
     static var hlSecondary: HLSecondaryButtonStyle { HLSecondaryButtonStyle() }
+}
+
+// MARK: - Themed scene wrapper
+
+/// Wraps a root view hosted in its own NSWindow/NSPanel so it observes AppSettings
+/// and re-applies the active theme's tint + color scheme live (the main AppShellView
+/// already observes AppSettings; standalone hosting views need this shim).
+struct ThemedScene<Content: View>: View {
+    @ObservedObject private var settings = AppSettings.shared
+    private let content: Content
+    init(@ViewBuilder _ content: () -> Content) { self.content = content() }
+    var body: some View {
+        content
+            .tint(DS.accent)
+            .preferredColorScheme(DS.theme.isDark ? .dark : .light)
+    }
 }
 
 // MARK: - Color hex helpers

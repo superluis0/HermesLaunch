@@ -63,6 +63,17 @@ final class ShellModel: ObservableObject {
     @Published var selection: ShellSection = .chat
     @Published var chatTitle: String = "Chat"
 
+    // Status-bar state, pushed from the AppDelegate's pollState timer.
+    @Published var gatewayRunning = false
+    @Published var statusModel: String = ""
+    @Published var hermesVersion: String = ""
+
+    func updateStatus(gatewayRunning: Bool, model: String, version: String) {
+        self.gatewayRunning = gatewayRunning
+        self.statusModel = model
+        self.hermesVersion = version
+    }
+
     let services: HermesServices
     init(services: HermesServices) { self.services = services }
 
@@ -92,24 +103,49 @@ struct AppShellView: View {
     @ObservedObject private var settings = AppSettings.shared   // live brand-color updates
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
-                brandHeader
-                sidebarList
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                VStack(spacing: 0) {
+                    brandHeader
+                    sidebarList
+                }
+                .navigationSplitViewColumnWidth(min: 208, ideal: 224, max: 300)
+            } detail: {
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationSplitViewColumnWidth(min: 208, ideal: 224, max: 300)
-        } detail: {
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider().opacity(0.5)
+            statusFooter
         }
         .frame(minWidth: 1040, minHeight: 640)
+        .tint(DS.accent)
+        .preferredColorScheme(DS.theme.isDark ? .dark : .light)
+    }
+
+    private var statusFooter: some View {
+        HStack(spacing: 8) {
+            HLStatusDot(color: model.gatewayRunning ? DS.success : DS.textTertiary, size: 7)
+            Text(model.gatewayRunning ? "Gateway ready" : "Gateway stopped")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            if !model.statusModel.isEmpty {
+                Text("·").foregroundStyle(.tertiary)
+                Image(systemName: "cpu").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(model.statusModel).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if !model.hermesVersion.isEmpty {
+                Text(model.hermesVersion).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .background(DS.surface)
     }
 
     private var brandHeader: some View {
         HStack(spacing: DS.Space.sm) {
             ZStack {
                 RoundedRectangle(cornerRadius: 7, style: .continuous).fill(DS.brandGradient)
-                Text("H").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                Text("H").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.onAccent)
             }
             .frame(width: 26, height: 26)
             Text("HermesLaunch").font(DS.Typography.heading)
@@ -169,7 +205,7 @@ struct SettingsPane: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Space.lg) {
-                    brandSection
+                    themeSection
                     voiceSection
                     shortcutsSection
                     appearanceSection
@@ -180,61 +216,51 @@ struct SettingsPane: View {
             }
         }
         .frame(minWidth: 560, minHeight: 480)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
     }
 
-    // Preset brand swatches (hex).
-    private static let brandSwatches = ["#8C59F5", "#2563EB", "#0EA5E9", "#10B981",
-                                        "#F59E0B", "#EF4444", "#EC4899", "#64748B"]
-
-    private var brandSection: some View {
+    private var themeSection: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
-            HLSectionHeader(title: "Brand color", subtitle: "Tints the sidebar mark and accents")
-            HLCard {
-                VStack(alignment: .leading, spacing: DS.Space.md) {
-                    HStack(spacing: DS.Space.sm) {
-                        // Default (gradient) chip.
-                        swatch(fill: AnyShapeStyle(LinearGradient(colors: [DS.violet, DS.pink],
-                                                                  startPoint: .topLeading, endPoint: .bottomTrailing)),
-                               selected: settings.brandColorHex == nil) {
-                            settings.brandColorHex = nil
-                        }
-                        ForEach(Self.brandSwatches, id: \.self) { hex in
-                            swatch(fill: AnyShapeStyle(Color(hex: hex) ?? .gray),
-                                   selected: settings.brandColorHex?.caseInsensitiveCompare(hex) == .orderedSame) {
-                                settings.brandColorHex = hex
-                            }
-                        }
-                    }
-                    HStack {
-                        ColorPicker("Custom color", selection: Binding(
-                            get: { Color(hex: settings.brandColorHex ?? "") ?? DS.accent },
-                            set: { settings.brandColorHex = $0.hexString }))
-                        .labelsHidden()
-                        Text("Custom color").font(DS.Typography.body)
-                        Spacer()
-                        if settings.brandColorHex != nil {
-                            Button("Reset") { settings.brandColorHex = nil }.buttonStyle(.hlSecondary)
-                        }
-                    }
+            HLSectionHeader(title: "Theme", subtitle: "Recolors the whole app and sets light or dark")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 164), spacing: DS.Space.md)],
+                      alignment: .leading, spacing: DS.Space.md) {
+                ForEach(HLTheme.allCases) { theme in
+                    themeCard(theme)
                 }
             }
         }
     }
 
-    private func swatch(fill: AnyShapeStyle, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(fill)
-                .frame(width: 28, height: 28)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(.white.opacity(selected ? 0.9 : 0.0), lineWidth: 2)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
-                )
+    private func themeCard(_ theme: HLTheme) -> some View {
+        let selected = settings.themeId == theme.id
+        return Button {
+            settings.themeId = theme.id
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                ThemeSwatch(palette: theme.palette)
+                    .frame(height: 62)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(.primary.opacity(0.08)))
+                HStack(spacing: 5) {
+                    Text(theme.displayName).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13)).foregroundStyle(DS.accent)
+                    }
+                }
+                Text(theme.blurb).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.surface))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(selected ? AnyShapeStyle(DS.accent) : AnyShapeStyle(DS.border.opacity(0.6)),
+                              lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
     }
@@ -295,6 +321,28 @@ struct SettingsPane: View {
             Text(label).font(DS.Typography.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
             Text(value).font(DS.Typography.mono).textSelection(.enabled)
             Spacer(minLength: 0)
+        }
+    }
+}
+
+/// Miniature window mock used in the theme-picker cards (sidebar + text rows + accent pill).
+private struct ThemeSwatch: View {
+    let palette: ThemePalette
+    var body: some View {
+        ZStack {
+            palette.bg
+            HStack(spacing: 0) {
+                palette.surface.frame(width: 22)   // mini sidebar
+                VStack(alignment: .leading, spacing: 5) {
+                    RoundedRectangle(cornerRadius: 2).fill(palette.accent).frame(width: 34, height: 5)
+                    RoundedRectangle(cornerRadius: 2).fill(palette.textSecondary.opacity(0.7)).frame(width: 52, height: 4)
+                    RoundedRectangle(cornerRadius: 2).fill(palette.textTertiary.opacity(0.7)).frame(width: 44, height: 4)
+                    Spacer(minLength: 0)
+                    Capsule().fill(palette.accent2).frame(width: 30, height: 9)
+                }
+                .padding(8)
+                Spacer(minLength: 0)
+            }
         }
     }
 }

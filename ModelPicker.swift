@@ -102,7 +102,7 @@ struct ModelPickerView: View {
             content
         }
         .frame(minWidth: 460, minHeight: 420)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.load() }
     }
 

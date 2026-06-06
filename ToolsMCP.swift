@@ -123,7 +123,7 @@ struct ToolsMCPView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 560)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.load() }
         .sheet(isPresented: $showAdd) { addSheet }
     }

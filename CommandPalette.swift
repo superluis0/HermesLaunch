@@ -395,7 +395,7 @@ final class PaletteController: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
-        let host = NSHostingView(rootView: PaletteView(vm: vm))
+        let host = NSHostingView(rootView: ThemedScene { PaletteView(vm: vm) })
         host.frame = panel.contentLayoutRect
         panel.contentView = host
         return panel

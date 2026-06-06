@@ -180,7 +180,7 @@ struct MenuBarStyleView: View {
             .padding(12)
         }
         .frame(width: 400, height: 560)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
     }
 
     // Live preview — reads `working`, so every edit repaints. Animates via TimelineView.
@@ -203,7 +203,7 @@ struct MenuBarStyleView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .underPageBackgroundColor)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(DS.surface))
         }
     }
 

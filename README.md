@@ -6,7 +6,7 @@
 
 ### A native macOS app for the [Hermes Agent](https://github.com/NousResearch/hermes) — one window for everything, one keystroke away.
 
-Chat with live streaming thinking, **talk to the agent** with on-device voice, switch models, watch swarm agents work a **live Kanban board**, manage tools & automations, and read a **beautiful usage dashboard** — all in one unified window, with a menu-bar companion and a global command palette. No terminal required.
+Chat with live streaming thinking, **talk to the agent** with on-device voice, switch models, watch swarm agents work a **live Kanban board**, manage tools & automations, and read a **beautiful usage dashboard** — all in one unified window with **16 built-in themes** (light & dark), a menu-bar companion, and a global command palette. No terminal required.
 
 <p>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square&logo=apple&logoColor=white" />
@@ -75,10 +75,10 @@ Hermes a question and watch the answer stream inline. Click the mic to **dictate
 
 | | |
 |---|---|
-| 🪟 **Unified app window** | One window with a sidebar — Chat, Models, Kanban, Scheduled, Automations, Tools & MCP, Sessions, Skills, Logs, Usage, Settings. Hybrid presence: a menu-bar companion always, a Dock icon while the window is open. |
+| 🪟 **Unified app window** | One window with a sidebar — Chat, Models, Kanban, Scheduled, Automations, Tools & MCP, Sessions, Skills, Logs, Usage, Settings — and a **status bar** showing gateway, model & version. Hybrid presence: a menu-bar companion always, a Dock icon while the window is open. |
 | ⌘ **Command palette** | **⌥Space** anywhere opens a Spotlight/Raycast-style palette — fuzzy-search every action, jump to any pane, **resume recent sessions**, or type a question for an **inline streaming answer**. Also driven by `hermeslaunch://` URLs. |
-| 🎙 **Local voice** | **Push-to-talk dictation** into the palette and optional **spoken replies** — fully on-device via FluidAudio's Parakeet (STT) and Kokoro (TTS) CoreML models on the ANE. Audio never leaves your Mac. |
-| 💬 **Chat** | Streaming chat over the Hermes **ACP** protocol — watch *thinking* and tool/search activity in real time, then the streamed answer. **Switch models mid-chat**, run **slash commands**, and **attach images**. |
+| 🎙 **Local voice** | **Push-to-talk dictation** into the chat composer and command palette, plus optional **spoken replies** — fully on-device via FluidAudio's Parakeet (STT) and Kokoro (TTS) CoreML models on the ANE. Audio never leaves your Mac. |
+| 💬 **Chat** | Streaming chat over the Hermes **ACP** protocol — watch *thinking* and tool/search activity in real time, then the streamed answer. A clean serif home screen sits above a **pill composer** with attach, mic, and a spoken-reply toggle. **Switch models mid-chat**, run **slash commands**, and **attach images**. |
 | 🧠 **In-app model picker** | Browse every authenticated provider's models (**collapsible by provider**), see the current one, and switch the default with a click — no terminal. New-provider sign-in (OAuth) opens the wizard when needed. |
 | 🗂 **Kanban board** | A native board over `hermes kanban` — **watch swarm agents work tasks live** (3-second refresh), and drive the full lifecycle: create, promote, assign, comment, block/unblock, complete, archive, **dispatch**. |
 | 🎛 **Tools & MCP manager** | Toggle the agent's **toolsets** (each with a description) and **add / remove MCP servers** — no `config.yaml` editing. |
@@ -87,26 +87,29 @@ Hermes a question and watch the answer stream inline. Click the mic to **dictate
 | 🗂 **Sessions · Skills · Logs** | Search/resume past conversations; install/update/uninstall skills; tail and filter logs — each a pane. |
 | 🚀 **Launch the TUI, caffeinated** | Start a TUI session in one click under `caffeinate -is`, so your Mac won't sleep mid-run. Auto-starts the gateway. |
 | ⏰ **Scheduled tasks** | Create/run/pause/delete recurring agent jobs (`hermes cron`) with a visual schedule builder and a delivery target. |
-| 🎨 **Make it yours** | Pick a **brand color** for the sidebar mark + accents, and style the menu-bar model text (rainbow / solid / gradient / pulse) — both with live in-app pickers. |
+| 🎨 **16 themes** | Recolor the whole app — **Hermes, Azul, Midnight, Fireside, Mono, Keanu, Slate**, all four **Catppuccin** flavors, plus **Dracula, Tokyo Night, Nord, Gruvbox, Rosé Pine**. Each declares light or dark, and the whole window follows. Style the menu-bar model text too (rainbow / solid / gradient / pulse). |
 | 🛰 **Gateway control** | Start / stop / restart the messaging gateway, see live status & PID, tail logs, or **send a one-off message**. |
 | 📨 **Send to Hermes** | A system-wide **Services** action: select text in any app → reply copied to your clipboard. |
 | 🔁 **Self-updating** | Run from a git clone and HermesLaunch can **pull → rebuild → relaunch** when new commits land. |
 | 🔔 **Ambient + notifications** | A "▶ agents working" menu indicator and macOS notifications when tasks finish, the TUI exits, or an update is ready. |
 
-## 🎨 Make it yours
+## 🎨 Themes
 
-Choose a **brand color** for the sidebar mark and accents from the swatches or a full color picker, and
-style the **menu-bar model text** — rainbow, solid, a gradient through your own colors, or a gentle pulse.
+Recolor the **entire app** — background, surfaces, text, and accents — from **16 built-in themes**, each
+declaring light or dark so the whole window (native controls included) follows along. Choose from
+**Hermes, Azul, Midnight, Fireside, Mono, Keanu, Slate**, all four **Catppuccin** flavors
+(Latte · Frappé · Macchiato · Mocha), **Dracula, Tokyo Night, Nord, Gruvbox**, and **Rosé Pine**. You can
+also style the **menu-bar model text** — rainbow, solid, a gradient through your own colors, or a pulse.
 
 <div align="center">
 <table>
   <tr>
-    <td width="50%"><img src="assets/app-settings.png" alt="Settings with brand color picker" width="100%" /></td>
-    <td width="50%"><img src="assets/style-picker.png" alt="Menu-bar style editor" width="100%" /></td>
+    <td width="50%"><img src="assets/app-settings.png" alt="Theme picker grid" width="100%" /></td>
+    <td width="50%"><img src="assets/app-chat-light.png" alt="Light theme — Catppuccin Latte" width="100%" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Settings</b> — brand color, voice, shortcuts</sub></td>
-    <td align="center"><sub><b>Menu-bar style</b> — swatches, sliders, live preview</sub></td>
+    <td align="center"><sub><b>Theme picker</b> — 16 palettes, light & dark</sub></td>
+    <td align="center"><sub><b>Light themes too</b> — the whole window follows</sub></td>
   </tr>
 </table>
 </div>
@@ -199,7 +202,7 @@ Issues and PRs welcome. The app builds via **SwiftPM** (`./build.sh` → `swift 
 `MainWindowController.swift`, `CommandPalette.swift`, `Voice.swift`, `ModelPicker.swift`,
 `KanbanBoard.swift`, `ToolsMCP.swift`, `Automations.swift`, `ScheduledTasks.swift`, `SessionsBrowser.swift`,
 `SkillsBrowser.swift`, `LogViewer.swift`, `UsageDashboard.swift`, `ChatView.swift`, plus
-`DesignSystem.swift` / `Settings.swift` and the menu-bar core in `HermesLaunch.swift`. The only external
+`DesignSystem.swift` / `Theming.swift` / `Settings.swift` and the menu-bar core in `HermesLaunch.swift`. The only external
 dependency is [FluidAudio](https://github.com/FluidInference/FluidAudio) (fetched on first build).
 
 The app icon is generated from code: edit `make_icon.swift`, then run `./make_icons.sh`. README

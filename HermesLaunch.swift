@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var suppressTUIExitNotice = false
 
     private var statusCache: (text: String, fetched: Date)? = nil
+    private var hermesVersionCache: String? = nil
     private var usageCache: (text: String?, fetched: Date)? = nil
     private var updateAvailable = false
     private var updateNotified = false
@@ -540,9 +541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         if menu === statusItem.menu {
-            pollState()
+            pollState()              // already refreshes the status snapshot
             updateGatewayStatusItem()
-            refreshStatusSnapshot()
             refreshTodayUsage()
         }
     }
@@ -589,6 +589,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateMenuEnabled()
         updateIcon()
         updateMenuBarAnimation()
+
+        // Keep the unified-app status bar current.
+        refreshStatusSnapshot()
+        ensureHermesVersion()
+        pushShellStatus()
+    }
+
+    /// Fetch `hermes version` once, cache a short "vX.Y.Z" form for the status bar.
+    private func ensureHermesVersion() {
+        guard hermesVersionCache == nil else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let v = Self.shortVersion(self.captureHermes(["version"]))
+            DispatchQueue.main.async { self.hermesVersionCache = v; self.pushShellStatus() }
+        }
+    }
+
+    private static func shortVersion(_ raw: String) -> String {
+        let line = raw.split(separator: "\n").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        let tok = line.split(separator: " ").first(where: { $0.contains(".") && $0.contains(where: { $0.isNumber }) })
+            .map(String.init) ?? line
+        if tok.hasPrefix("v") { return tok }
+        return tok.first?.isNumber == true ? "v" + tok : tok
+    }
+
+    /// Push gateway/model/version into the unified-app status bar.
+    private func pushShellStatus() {
+        guard let model = mainWindow?.model else { return }
+        var modelText = statusCache?.text ?? ""
+        if modelText.hasPrefix("Status: ") { modelText.removeFirst("Status: ".count) }
+        if modelText == "—" { modelText = "" }
+        model.updateStatus(gatewayRunning: gatewayRunning,
+                           model: modelText,
+                           version: hermesVersionCache ?? "")
     }
 
     private func updateMenuEnabled() {
@@ -665,6 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.statusInfoItem.title = text
                 self.statusCache = (text, Date())
+                self.pushShellStatus()
             }
         }
     }
@@ -1051,7 +1086,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         win.title = "Menu Bar Style"
         win.isReleasedWhenClosed = false
         win.center()
-        win.contentView = NSHostingView(rootView: view)
+        win.contentView = NSHostingView(rootView: ThemedScene { view })
         menuBarStyleWindow = win
         win.makeKeyAndOrderFront(nil)
     }

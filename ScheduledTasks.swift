@@ -127,7 +127,7 @@ struct ScheduledTasksView: View {
             }
         }
         .frame(minWidth: 460, minHeight: 420)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.load() }
         .sheet(isPresented: $showNew) { NewTaskSheet(model: model, isPresented: $showNew) }
     }
@@ -137,7 +137,7 @@ struct ScheduledTasksView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Scheduled Tasks").font(.system(size: 17, weight: .bold))
                 HStack(spacing: 5) {
-                    Circle().fill(model.schedulerRunning ? Color.green : Color.orange).frame(width: 7, height: 7)
+                    Circle().fill(model.schedulerRunning ? DS.success : DS.warning).frame(width: 7, height: 7)
                     Text(model.schedulerRunning ? "Scheduler running" : "Scheduler stopped (start the gateway)")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
@@ -175,8 +175,8 @@ struct JobCard: View {
                 Text(job.active ? "active" : "paused")
                     .font(.system(size: 10, weight: .semibold))
                     .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill((job.active ? Color.green : Color.orange).opacity(0.2)))
-                    .foregroundStyle(job.active ? Color.green : Color.orange)
+                    .background(Capsule().fill((job.active ? DS.success : DS.warning).opacity(0.2)))
+                    .foregroundStyle(job.active ? DS.success : DS.warning)
             }
             row("clock", job.schedule + (job.repeatStr.isEmpty || job.repeatStr == "∞" ? "" : " · ×\(job.repeatStr)"))
             row("calendar", "Next: \(CronModel.friendlyNextRun(job.nextRun))")
@@ -195,7 +195,7 @@ struct JobCard: View {
             .padding(.top, 2)
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(DS.surface))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary, lineWidth: 1))
         .confirmationDialog("Delete “\(job.name)”?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { model.action("remove", job.id) }

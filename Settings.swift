@@ -10,7 +10,14 @@ import FluidAudio  // Phase 0 linkage check; used in earnest by the Voice pillar
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     private let defaults = UserDefaults.standard
-    private init() {}
+    private init() {
+        // One-time migration: the standalone brand-color picker was replaced by the
+        // theme engine. Drop any saved custom brand color and fall back to the default
+        // theme so there are no dangling references.
+        if defaults.object(forKey: "themeId") == nil, defaults.string(forKey: "brandColorHex") != nil {
+            defaults.removeObject(forKey: "brandColorHex")
+        }
+    }
 
     /// `~/Library/Application Support/HermesLaunch/` — created on first access.
     static let supportDir: URL = {
@@ -58,13 +65,12 @@ final class AppSettings: ObservableObject {
         set { store("voicePrefs", newValue) }
     }
 
-    // MARK: Brand color (sidebar mark + app accent); nil = default violet→pink
+    // MARK: Theme (recolors the whole app + drives light/dark); see Theming.swift
 
-    var brandColorHex: String? {
-        get { defaults.string(forKey: "brandColorHex") }
+    var themeId: String {
+        get { defaults.string(forKey: "themeId") ?? HLTheme.fallback.rawValue }
         set {
-            if let newValue { defaults.set(newValue, forKey: "brandColorHex") }
-            else { defaults.removeObject(forKey: "brandColorHex") }
+            defaults.set(newValue, forKey: "themeId")
             objectWillChange.send()
         }
     }

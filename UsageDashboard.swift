@@ -92,7 +92,7 @@ struct UsageDashboardView: View {
             }
         }
         .frame(minWidth: 540, minHeight: 540)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.load() }   // refresh each time the pane is shown (model is retained by the shell)
     }
 
@@ -127,9 +127,11 @@ struct UsageDashboardView: View {
         if let s = model.stats, s.hasData {
             VStack(alignment: .leading, spacing: 18) {
                 statCards(s)
-                if (s.inputTokens ?? 0) + (s.outputTokens ?? 0) > 0 {
+                if (s.totalTokens ?? 0) > 0 {
                     ChartCard(title: "Token split", systemImage: "chart.pie.fill") {
-                        TokenSplit(input: s.inputTokens ?? 0, output: s.outputTokens ?? 0)
+                        TokenSplit(input: s.inputTokens ?? 0,
+                                   output: s.outputTokens ?? 0,
+                                   total: s.totalTokens ?? 0)
                     }
                 }
                 if !s.models.isEmpty {
@@ -166,7 +168,7 @@ struct UsageDashboardView: View {
             ("Total tokens", s.totalTokens.map(compactInt) ?? "—", "number",                  vibrantPalette[1]),
             ("Tool calls", s.toolCalls.map { "\($0)" } ?? "—",  "hammer.fill",                vibrantPalette[2]),
             ("Messages",   s.messages.map { "\($0)" } ?? "—",   "text.bubble.fill",           vibrantPalette[3]),
-            ("Active time", s.activeTime ?? "—",                "clock.fill",                 vibrantPalette[4]),
+            ("Active time", s.activeTime.map { "\($0) (est.)" } ?? "—", "clock.fill",         vibrantPalette[4]),
         ]
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
             ForEach(cards, id: \.0) { c in
@@ -231,7 +233,7 @@ struct ChartCard<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 16).fill(DS.surface))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.quaternary, lineWidth: 1))
     }
 }
@@ -241,25 +243,26 @@ struct ChartCard<Content: View>: View {
 struct TokenSplit: View {
     let input: Int
     let output: Int
-    private var total: Int { input + output }
-    private var inFrac: CGFloat { total > 0 ? CGFloat(input) / CGFloat(total) : 0 }
+    let total: Int
+
+    // `Total tokens` from `hermes insights` includes cache-read + reasoning
+    // tokens that aren't in the Input/Output lines. Surface that gap as its own
+    // slice so the donut center equals the headline "Total tokens" stat.
+    private var cached: Int { max(0, total - input - output) }
+    private var denom: Int { max(total, input + output) }   // guard if total is under-reported
+    private func frac(_ v: Int) -> CGFloat { denom > 0 ? CGFloat(v) / CGFloat(denom) : 0 }
 
     var body: some View {
-        HStack(spacing: 24) {
+        let inFrac = frac(input)
+        let outEnd = frac(input + output)
+        return HStack(spacing: 24) {
             ZStack {
                 Circle().stroke(.quaternary, lineWidth: 16)
-                Circle()
-                    .trim(from: 0, to: inFrac)
-                    .stroke(LinearGradient(colors: [vibrantPalette[0], vibrantPalette[5]], startPoint: .top, endPoint: .bottom),
-                            style: StrokeStyle(lineWidth: 16, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                Circle()
-                    .trim(from: inFrac, to: 1)
-                    .stroke(LinearGradient(colors: [vibrantPalette[1], vibrantPalette[2]], startPoint: .bottom, endPoint: .top),
-                            style: StrokeStyle(lineWidth: 16, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                ring(from: 0,      to: inFrac, colors: [vibrantPalette[0], vibrantPalette[5]])
+                ring(from: inFrac, to: outEnd, colors: [vibrantPalette[2], vibrantPalette[3]])
+                ring(from: outEnd, to: 1,      colors: [vibrantPalette[7], vibrantPalette[1]])
                 VStack(spacing: 1) {
-                    Text(compactInt(total)).font(.system(size: 21, weight: .bold, design: .rounded))
+                    Text(compactInt(denom)).font(.system(size: 21, weight: .bold, design: .rounded))
                     Text("tokens").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
             }
@@ -268,14 +271,25 @@ struct TokenSplit: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 legend(color: vibrantPalette[0], label: "Input", value: input)
-                legend(color: vibrantPalette[1], label: "Output", value: output)
+                legend(color: vibrantPalette[2], label: "Output", value: output)
+                if cached > 0 {
+                    legend(color: vibrantPalette[7], label: "Cache & reasoning", value: cached)
+                }
             }
             Spacer()
         }
     }
 
+    private func ring(from: CGFloat, to: CGFloat, colors: [Color]) -> some View {
+        Circle()
+            .trim(from: from, to: to)
+            .stroke(LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom),
+                    style: StrokeStyle(lineWidth: 16, lineCap: .butt))
+            .rotationEffect(.degrees(-90))
+    }
+
     private func legend(color: Color, label: String, value: Int) -> some View {
-        let pct = total > 0 ? Int((Double(value) / Double(total) * 100).rounded()) : 0
+        let pct = denom > 0 ? Int((Double(value) / Double(denom) * 100).rounded()) : 0
         return HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 3).fill(color).frame(width: 11, height: 11)
             VStack(alignment: .leading, spacing: 1) {

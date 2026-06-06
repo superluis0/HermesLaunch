@@ -220,19 +220,32 @@ func toolVerb(for kind: String) -> String {
 
 struct ChatView: View {
     @ObservedObject var vm: ChatViewModel
-    private let hermesGradient = LinearGradient(colors: [Color(red: 0.55, green: 0.35, blue: 0.96),
-                                                         Color(red: 0.93, green: 0.36, blue: 0.62)],
-                                                startPoint: .topLeading, endPoint: .bottomTrailing)
+    @ObservedObject private var voice = VoiceEngine.shared
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
         VStack(spacing: 0) {
-            if !vm.models.isEmpty { modelBar; Divider() }
-            transcript
-            Divider()
+            if !vm.models.isEmpty { modelBar; Divider().opacity(0.5) }
+            if vm.messages.isEmpty {
+                heroEmptyState
+            } else {
+                transcript
+            }
             composer
         }
         .frame(minWidth: 460, minHeight: 460)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(chatBackground)
+    }
+
+    /// Themed background with a faint accent glow behind the hero (Nous-style texture).
+    private var chatBackground: some View {
+        ZStack {
+            DS.bg
+            RadialGradient(colors: [DS.accent.opacity(0.10), .clear],
+                           center: .top, startRadius: 0, endRadius: 520)
+                .allowsHitTesting(false)
+        }
+        .ignoresSafeArea()
     }
 
     private var modelBar: some View {
@@ -255,11 +268,8 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if vm.messages.isEmpty {
-                        emptyState.padding(.top, 80)
-                    }
                     ForEach(vm.messages) { msg in
-                        TurnView(message: msg, hermesGradient: hermesGradient)
+                        TurnView(message: msg, hermesGradient: DS.brandGradient)
                         if msg.id != vm.messages.last?.id {
                             Divider().padding(.leading, 52).opacity(0.5)
                         }
@@ -278,81 +288,134 @@ struct ChatView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(hermesGradient)
-            Text("Ask Hermes anything")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text("It can search the web, read files, and run tools.")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
+    private var heroEmptyState: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Text("HERMES AGENT")
+                .font(.system(size: 54, weight: .regular, design: .serif))
+                .tracking(3)
+                .foregroundStyle(DS.textPrimary)
+                .multilineTextAlignment(.center)
+            Spacer()
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 24)
     }
 
     private var composer: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 8) {
             if let img = vm.pendingImage { attachmentChip(img) }
-            HStack(alignment: .bottom, spacing: 8) {
-                commandsMenu
-                Button(action: pickImage) { Image(systemName: "paperclip").font(.system(size: 17)) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .disabled(vm.isStreaming || !vm.isReady).help("Attach image")
-
-                TextField("Message Hermes…", text: $vm.draft, axis: .vertical)
+            HStack(alignment: .center, spacing: 6) {
+                plusMenu
+                TextField("Let's get to work...", text: $vm.draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .lineLimit(1...6)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 11).fill(.quaternary.opacity(0.6)))
-                    .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.quaternary, lineWidth: 1))
+                    .foregroundStyle(DS.textPrimary)
                     .onSubmit { vm.submit() }
-
-                if vm.isStreaming {
-                    Button(action: { vm.stop() }) {
-                        Image(systemName: "stop.circle.fill").font(.system(size: 24))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Stop")
-                } else {
-                    Button(action: { vm.submit() }) {
-                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 24))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(canSend ? AnyShapeStyle(hermesGradient) : AnyShapeStyle(Color.secondary.opacity(0.4)))
-                    .disabled(!canSend)
-                    .help("Send")
-                }
+                micButton
+                waveformButton
+                sendOrStopButton
             }
+            .padding(.leading, 8).padding(.trailing, 6).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.surface))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(DS.border, lineWidth: 1))
+
             HStack(spacing: 6) {
                 Circle().fill(statusColor).frame(width: 6, height: 6)
                 Text(vm.status).font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer()
                 Text("↩ send   ⇧↩ newline").font(.system(size: 10)).foregroundStyle(.tertiary)
             }
+            .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
-    @ViewBuilder private var commandsMenu: some View {
-        if !vm.commands.isEmpty {
-            Menu {
+    /// Left "+" — attach an image and access slash commands.
+    private var plusMenu: some View {
+        Menu {
+            Button { pickImage() } label: { Label("Attach image…", systemImage: "photo") }
+            if !vm.commands.isEmpty {
+                Divider()
                 ForEach(vm.commands) { c in
                     Button("/\(c.name)") {
                         if c.hasInput { vm.draft = "/\(c.name) " } else { vm.runCommand(c.name) }
                     }
                 }
-            } label: { Image(systemName: "slash.circle").font(.system(size: 18)) }
-            .menuStyle(.borderlessButton).fixedSize()
-            .disabled(vm.isStreaming || !vm.isReady)
-            .help("Slash commands")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(DS.textSecondary)
+                .frame(width: 28, height: 28)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .disabled(vm.isStreaming || !vm.isReady)
+        .help("Attach & commands")
+    }
+
+    /// Push-to-talk dictation into the draft (local Parakeet via VoiceEngine).
+    @ViewBuilder private var micButton: some View {
+        if settings.voice.dictationEnabled {
+            Button(action: toggleDictation) {
+                Image(systemName: isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isRecording ? DS.danger : DS.textSecondary)
+                    .scaleEffect(isRecording ? 1.0 + CGFloat(voice.level) * 0.4 : 1)
+            }
+            .buttonStyle(.plain)
+            .help(isRecording ? "Stop dictation" : "Dictate")
+        }
+    }
+
+    /// Toggle spoken replies (hands-free voice mode).
+    private var waveformButton: some View {
+        Button {
+            var v = settings.voice; v.speakReplies.toggle(); settings.voice = v
+        } label: {
+            Image(systemName: "waveform")
+                .font(.system(size: 16))
+                .foregroundStyle(settings.voice.speakReplies ? AnyShapeStyle(DS.accent)
+                                                              : AnyShapeStyle(DS.textSecondary))
+        }
+        .buttonStyle(.plain)
+        .help(settings.voice.speakReplies ? "Spoken replies on" : "Speak replies")
+    }
+
+    @ViewBuilder private var sendOrStopButton: some View {
+        if vm.isStreaming {
+            Button(action: { vm.stop() }) {
+                Image(systemName: "stop.circle.fill").font(.system(size: 26))
+            }
+            .buttonStyle(.plain).foregroundStyle(DS.textSecondary).help("Stop")
+        } else {
+            Button(action: { vm.submit() }) {
+                Image(systemName: "arrow.up.circle.fill").font(.system(size: 26))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(canSend ? AnyShapeStyle(DS.brandGradient) : AnyShapeStyle(DS.textTertiary.opacity(0.5)))
+            .disabled(!canSend)
+            .help("Send")
+        }
+    }
+
+    private var isRecording: Bool {
+        if case .recording = voice.status { return true } else { return false }
+    }
+
+    private func toggleDictation() {
+        let v = VoiceEngine.shared
+        if case .recording = v.status {
+            v.stopDictation { [vm] text in
+                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { vm.draft = vm.draft.isEmpty ? t : vm.draft + " " + t }
+            }
+        } else {
+            v.startDictation()
         }
     }
 
@@ -384,9 +447,9 @@ struct ChatView: View {
     }
 
     private var statusColor: Color {
-        if vm.status.hasPrefix("error") { return .red }
-        if vm.isReady { return .green }
-        return .orange
+        if vm.status.hasPrefix("error") { return DS.danger }
+        if vm.isReady { return DS.success }
+        return DS.warning
     }
 }
 

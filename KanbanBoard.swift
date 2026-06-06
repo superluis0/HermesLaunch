@@ -124,7 +124,7 @@ struct KanbanBoardView: View {
             }
         }
         .frame(minWidth: 820, minHeight: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DS.bg)
         .onAppear { model.startAuto() }
         .onDisappear { model.stopAuto() }
         .sheet(isPresented: $showNewTask) { newTaskSheet }
