@@ -193,6 +193,7 @@ func sfSymbol(for kind: String) -> String {
 }
 
 /// Render inline markdown (bold/italic/code/links), preserving newlines; plain fallback.
+/// Inline markdown only (bold/italic/links/code spans) → a single `Text`.
 func markdownText(_ s: String) -> Text {
     if let attr = try? AttributedString(
         markdown: s,
@@ -200,6 +201,180 @@ func markdownText(_ s: String) -> Text {
         return Text(attr)
     }
     return Text(s)
+}
+
+// MARK: - Block-level markdown renderer
+//
+// AttributedString only does *inline* markdown — headings, lists, fenced code,
+// and blockquotes show up as raw "##", "-", "```". This lightweight, zero-dependency
+// renderer splits the text into blocks and lays each out natively, parsing inline
+// formatting per-block via `markdownText`.
+
+enum MarkdownBlock {
+    case heading(level: Int, text: String)
+    case paragraph(String)
+    case bullet([String])
+    case numbered([String])
+    case code(String)
+    case quote(String)
+    case rule
+
+    static func isBullet(_ l: String) -> Bool {
+        let t = l.drop(while: { $0 == " " })
+        return t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("+ ")
+    }
+    static func isNumbered(_ l: String) -> Bool {
+        let t = l.drop(while: { $0 == " " })
+        guard let dot = t.firstIndex(of: ".") else { return false }
+        let num = t[t.startIndex..<dot]
+        return !num.isEmpty && num.allSatisfy(\.isNumber) && t[t.index(after: dot)...].hasPrefix(" ")
+    }
+    static func stripMarker(_ l: String) -> String {
+        var t = String(l.drop(while: { $0 == " " }))
+        if let r = t.range(of: #"^([-*+]|\d+\.)\s+"#, options: .regularExpression) {
+            t.removeSubrange(r)
+        }
+        return t
+    }
+
+    static func parse(_ source: String) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+        let lines = source.components(separatedBy: "\n")
+        var i = 0
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+
+            if line.isEmpty { i += 1; continue }
+
+            // Fenced code block (collect until closing fence or EOF — handles streaming).
+            if line.hasPrefix("```") {
+                var code: [String] = []
+                i += 1
+                while i < lines.count && !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    code.append(lines[i]); i += 1
+                }
+                if i < lines.count { i += 1 }   // skip closing fence
+                blocks.append(.code(code.joined(separator: "\n")))
+                continue
+            }
+
+            if line == "---" || line == "***" || line == "___" {
+                blocks.append(.rule); i += 1; continue
+            }
+
+            if let r = line.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
+                let level = line[line.startIndex..<r.upperBound].filter { $0 == "#" }.count
+                blocks.append(.heading(level: level, text: String(line[r.upperBound...])))
+                i += 1; continue
+            }
+
+            if line.hasPrefix(">") {
+                var quote: [String] = []
+                while i < lines.count {
+                    let t = lines[i].trimmingCharacters(in: .whitespaces)
+                    guard t.hasPrefix(">") else { break }
+                    quote.append(String(t.dropFirst().drop(while: { $0 == " " })))
+                    i += 1
+                }
+                blocks.append(.quote(quote.joined(separator: "\n")))
+                continue
+            }
+
+            if isBullet(lines[i]) {
+                var items: [String] = []
+                while i < lines.count && isBullet(lines[i]) { items.append(stripMarker(lines[i])); i += 1 }
+                blocks.append(.bullet(items)); continue
+            }
+
+            if isNumbered(lines[i]) {
+                var items: [String] = []
+                while i < lines.count && isNumbered(lines[i]) { items.append(stripMarker(lines[i])); i += 1 }
+                blocks.append(.numbered(items)); continue
+            }
+
+            // Paragraph: gather consecutive plain lines until a blank line or block starter.
+            var para: [String] = []
+            while i < lines.count {
+                let t = lines[i].trimmingCharacters(in: .whitespaces)
+                if t.isEmpty || t.hasPrefix("```") || t.hasPrefix("#") || t.hasPrefix(">")
+                    || isBullet(lines[i]) || isNumbered(lines[i])
+                    || t == "---" || t == "***" || t == "___" { break }
+                para.append(t); i += 1
+            }
+            if !para.isEmpty { blocks.append(.paragraph(para.joined(separator: "\n"))) }
+        }
+        return blocks
+    }
+}
+
+struct MarkdownView: View {
+    private let blocks: [MarkdownBlock]
+    init(_ source: String) { blocks = MarkdownBlock.parse(source) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                view(for: block)
+            }
+        }
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            markdownText(text)
+                .font(.system(size: headingSize(level), weight: .bold))
+                .foregroundStyle(.primary)
+        case .paragraph(let text):
+            markdownText(text).font(.system(size: 13)).foregroundStyle(.primary)
+        case .bullet(let items):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text("•").font(.system(size: 13)).foregroundStyle(.secondary)
+                        markdownText(item).font(.system(size: 13)).foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        case .numbered(let items):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text("\(idx + 1).").font(.system(size: 13)).monospacedDigit().foregroundStyle(.secondary)
+                        markdownText(item).font(.system(size: 13)).foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        case .code(let code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(10)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(DS.surfaceElevated))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DS.border.opacity(0.6)))
+        case .quote(let text):
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2).fill(DS.accent.opacity(0.6)).frame(width: 3)
+                markdownText(text).font(.system(size: 13)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        case .rule:
+            Divider()
+        }
+    }
+
+    private func headingSize(_ level: Int) -> CGFloat {
+        switch level { case 1: return 20; case 2: return 17; case 3: return 15; default: return 13.5 }
+    }
 }
 
 func toolVerb(for kind: String) -> String {
@@ -477,11 +652,15 @@ struct TurnView: View {
                 }
 
                 if !message.text.isEmpty {
-                    (message.role == .assistant ? markdownText(message.text) : Text(message.text))
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if message.role == .assistant {
+                        MarkdownView(message.text)
+                    } else {
+                        Text(message.text)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 if let t = message.imageThumb {
@@ -611,4 +790,133 @@ final class ChatSession {
     /// Connect to `hermes acp` (idempotent).
     func start() { guard !started else { return }; started = true; client.start() }
     func shutdown() { client.shutdown() }
+}
+
+// MARK: - Multiple chats
+
+/// One open chat: its live ChatSession plus a display title (the agent reports a
+/// title once the conversation has content; until then it's "New Chat").
+final class ChatTab: Identifiable, ObservableObject {
+    let id = UUID()
+    let session: ChatSession
+    @Published var title: String = "New Chat"
+
+    init(hermesPath: String) {
+        session = ChatSession(hermesPath: hermesPath)
+        session.onTitle = { [weak self] t in
+            let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            self?.title = trimmed.isEmpty ? "New Chat" : trimmed
+        }
+        session.start()
+    }
+}
+
+/// Manages the set of open chats and which one is active. Each chat is an
+/// independent `hermes acp` session, so several can run side by side.
+final class ChatsModel: ObservableObject {
+    @Published var tabs: [ChatTab] = []
+    @Published var activeId: UUID?
+    private let hermesPath: String
+
+    init(hermesPath: String) {
+        self.hermesPath = hermesPath
+        newChat()
+    }
+
+    var active: ChatTab? { tabs.first { $0.id == activeId } }
+
+    func newChat() {
+        let tab = ChatTab(hermesPath: hermesPath)
+        tabs.append(tab)
+        activeId = tab.id
+    }
+
+    func select(_ id: UUID) { activeId = id }
+
+    func close(_ id: UUID) {
+        guard let idx = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[idx].session.shutdown()
+        let wasActive = activeId == id
+        tabs.remove(at: idx)
+        if tabs.isEmpty {
+            newChat()                                   // always keep at least one chat
+        } else if wasActive {
+            activeId = tabs[min(idx, tabs.count - 1)].id
+        }
+    }
+}
+
+/// The Chat pane: a tab strip of open chats above the active conversation.
+struct ChatContainerView: View {
+    @ObservedObject var model: ChatsModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            tabStrip
+            Divider().opacity(0.5)
+            if let active = model.active {
+                ChatView(vm: active.session.vm)
+                    .id(active.id)   // swap view identity per chat (fresh scroll/state)
+            }
+        }
+    }
+
+    private var tabStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(model.tabs) { tab in
+                    ChatTabChip(tab: tab,
+                                active: tab.id == model.activeId,
+                                onSelect: { model.select(tab.id) },
+                                onClose: { model.close(tab.id) })
+                }
+                Button(action: { model.newChat() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DS.textSecondary)
+                .help("New chat")
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+        .background(DS.surface)
+    }
+}
+
+private struct ChatTabChip: View {
+    @ObservedObject var tab: ChatTab
+    let active: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bubble.left").font(.system(size: 10))
+            Text(tab.title)
+                .font(.system(size: 12, weight: active ? .semibold : .regular))
+                .lineLimit(1)
+                .frame(maxWidth: 150, alignment: .leading)
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .opacity(hover || active ? 0.6 : 0.0)
+            .help("Close chat")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .foregroundStyle(active ? DS.textPrimary : DS.textSecondary)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(active ? DS.accent.opacity(0.18) : DS.surfaceElevated.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(active ? DS.accent.opacity(0.5) : Color.clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+        .onHover { hover = $0 }
+    }
 }

@@ -61,7 +61,6 @@ struct HermesServices {
 
 final class ShellModel: ObservableObject {
     @Published var selection: ShellSection = .chat
-    @Published var chatTitle: String = "Chat"
 
     // Status-bar state, pushed from the AppDelegate's pollState timer.
     @Published var gatewayRunning = false
@@ -78,12 +77,7 @@ final class ShellModel: ObservableObject {
     init(services: HermesServices) { self.services = services }
 
     // Lazily created + retained so each pane keeps its state across navigation.
-    private(set) lazy var chat: ChatSession = {
-        let session = ChatSession(hermesPath: services.hermesPath)
-        session.onTitle = { [weak self] t in self?.chatTitle = t.isEmpty ? "Chat" : t }
-        session.start()
-        return session
-    }()
+    private(set) lazy var chats = ChatsModel(hermesPath: services.hermesPath)
     private(set) lazy var models = ModelPickerModel(services: services)
     private(set) lazy var kanban = KanbanModel(exec: services.exec)
     private(set) lazy var cron = CronModel(exec: services.exec)
@@ -163,7 +157,7 @@ struct AppShellView: View {
             set: { if let v = $0 { model.selection = v } })
         return List(selection: selection) {
             ForEach(ShellSection.allCases) { sec in
-                Label(sec == .chat ? model.chatTitle : sec.title, systemImage: sec.symbol)
+                Label(sec.title, systemImage: sec.symbol)
                     .lineLimit(1)
                     .tag(sec)
             }
@@ -173,7 +167,7 @@ struct AppShellView: View {
 
     @ViewBuilder private var detail: some View {
         switch model.selection {
-        case .chat:        ChatView(vm: model.chat.vm)
+        case .chat:        ChatContainerView(model: model.chats)
         case .models:      ModelPickerView(model: model.models)
         case .kanban:      KanbanBoardView(model: model.kanban)
         case .scheduled:   ScheduledTasksView(model: model.cron)
