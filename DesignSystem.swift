@@ -79,6 +79,140 @@ enum DS {
     enum Motion {
         static let spring = Animation.spring(response: 0.32, dampingFraction: 0.82)
         static let quick  = Animation.easeOut(duration: 0.16)
+        /// Pane crossfades and other ambient transitions — a touch slower than `quick`.
+        static let gentle = Animation.easeOut(duration: 0.20)
+    }
+}
+
+// MARK: - Haptics
+
+/// Trackpad haptics, tied ONLY to direct user gestures (send, confirm, drop).
+/// No-ops on hardware without a Force Touch trackpad.
+enum HLHaptics {
+    static func tap()  { NSHapticFeedbackManager.defaultPerformer.perform(.generic,   performanceTime: .now) }
+    static func snap() { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+}
+
+// MARK: - Toasts
+
+/// App-wide transient feedback. `HLToastView` (hosted once, in the main window's
+/// shell) observes this singleton; any code can `ToastCenter.shared.show(…)`.
+final class ToastCenter: ObservableObject {
+    static let shared = ToastCenter()
+
+    struct Toast: Identifiable {
+        let id = UUID()
+        var message: String
+        var systemImage: String? = nil
+        var actionTitle: String? = nil
+        var action: (() -> Void)? = nil
+    }
+
+    @Published private(set) var current: Toast?
+    private var dismissWork: DispatchWorkItem?
+
+    func show(_ message: String, systemImage: String? = nil,
+              duration: TimeInterval = 3.0,
+              actionTitle: String? = nil, action: (() -> Void)? = nil) {
+        dismissWork?.cancel()
+        withAnimation(DS.Motion.spring) {
+            current = Toast(message: message, systemImage: systemImage,
+                            actionTitle: actionTitle, action: action)
+        }
+        let work = DispatchWorkItem { [weak self] in self?.dismiss() }
+        dismissWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+
+    func dismiss() {
+        dismissWork?.cancel()
+        dismissWork = nil
+        withAnimation(DS.Motion.spring) { current = nil }
+    }
+}
+
+/// The capsule that renders the current toast. Host once per window shell.
+struct HLToastView: View {
+    @ObservedObject private var center = ToastCenter.shared
+
+    var body: some View {
+        if let toast = center.current {
+            HStack(spacing: DS.Space.sm) {
+                if let symbol = toast.systemImage {
+                    Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.accent)
+                }
+                Text(toast.message).font(DS.Typography.body).lineLimit(1)
+                if let title = toast.actionTitle {
+                    Button(title) {
+                        toast.action?()
+                        center.dismiss()
+                    }
+                    .buttonStyle(.hlSecondary)
+                }
+            }
+            .padding(.horizontal, DS.Space.lg)
+            .padding(.vertical, DS.Space.sm + 2)
+            .background(Capsule(style: .continuous).fill(DS.surfaceElevated))
+            .overlay(Capsule(style: .continuous).strokeBorder(DS.border.opacity(0.7)))
+            .shadow(color: .black.opacity(0.25), radius: 14, y: 4)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .id(toast.id)
+        }
+    }
+}
+
+// MARK: - Empty state
+
+/// A friendly empty-state block: icon, title, optional subtitle and CTA.
+struct HLEmptyState: View {
+    let systemImage: String
+    let title: String
+    var subtitle: String? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: DS.Space.sm) {
+            Image(systemName: systemImage)
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text(title).font(DS.Typography.heading).foregroundStyle(.secondary)
+            if let subtitle {
+                Text(subtitle).font(DS.Typography.caption).foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.hlPrimary)
+                    .padding(.top, DS.Space.xs)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Hover highlight
+
+/// Subtle row highlight on pointer hover (Raycast-style list affordance).
+struct HLHoverHighlight: ViewModifier {
+    var cornerRadius: CGFloat = DS.Radius.sm
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(DS.textPrimary.opacity(hovering ? 0.05 : 0))
+            )
+            .animation(DS.Motion.quick, value: hovering)
+            .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    func hlHoverHighlight(cornerRadius: CGFloat = DS.Radius.sm) -> some View {
+        modifier(HLHoverHighlight(cornerRadius: cornerRadius))
     }
 }
 
@@ -186,6 +320,8 @@ struct HLSecondaryButtonStyle: ButtonStyle {
             .background(DS.textPrimary.opacity(configuration.isPressed ? 0.16 : 0.08))
             .foregroundStyle(DS.textPrimary)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(DS.Motion.quick, value: configuration.isPressed)
     }
 }
 

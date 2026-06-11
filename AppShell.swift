@@ -126,6 +126,9 @@ struct AppShellView: View {
             statusFooter
         }
         .frame(minWidth: 1040, minHeight: 640)
+        .overlay(alignment: .bottom) {
+            HLToastView().padding(.bottom, 34)   // clears the status footer
+        }
         .tint(DS.accent)
         .preferredColorScheme(DS.theme.isDark ? .dark : .light)
     }
