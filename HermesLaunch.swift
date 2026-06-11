@@ -187,6 +187,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             applyModel: { [weak self] model, provider, baseURL in
                 self?.applyModel(model: model, provider: provider, baseURL: baseURL)
             },
+            persistChatModel: { [weak self] model in
+                // A model picked inside a chat: persist as the default (provider/base_url
+                // untouched) without re-propagating into the open chats.
+                self?.applyModel(model: model, provider: "", baseURL: nil,
+                                 label: model, propagateToChats: false)
+            },
             openModelWizard: { [weak self] in
                 guard let self else { return }
                 self.runInTerminal([self.hermesPath, "model"])
@@ -1843,7 +1849,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Persist a model selection via `hermes config set` and refresh the UI.
     /// `provider`/`baseURL` are only written when non-empty (nil baseURL leaves it
     /// untouched so Hermes resolves it for the provider at runtime).
-    func applyModel(model: String, provider: String, baseURL: String?, label: String? = nil) {
+    func applyModel(model: String, provider: String, baseURL: String?, label: String? = nil,
+                    propagateToChats: Bool = true) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             self.runHermes(["config", "set", "model.default", model], wait: true)
@@ -1858,6 +1865,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.usageCache = nil
                 self.bumpPoll()
                 self.refreshMenuBarText()
+                // Make any open chats follow the newly chosen model (only if Chat
+                // was ever opened — peeking avoids spawning an ACP session for it).
+                // Skipped when the change *originated* in a chat, to avoid a loop.
+                if propagateToChats {
+                    self.mainWindow?.model.existingChats?.applyDefaultModel(model)
+                }
                 self.notify(title: "Model switched", body: label ?? model)
             }
         }

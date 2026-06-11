@@ -56,6 +56,9 @@ struct HermesServices {
     let currentModel: () -> (model: String, provider: String, baseURL: String)?
     let providerBaseURLs: () -> [String: String]
     let applyModel: (_ model: String, _ provider: String, _ baseURL: String?) -> Void
+    /// Persist a model chosen inside a chat as the new global default (provider
+    /// left untouched; does not re-propagate back into the open chats).
+    let persistChatModel: (_ model: String) -> Void
     let openModelWizard: () -> Void
 }
 
@@ -77,7 +80,18 @@ final class ShellModel: ObservableObject {
     init(services: HermesServices) { self.services = services }
 
     // Lazily created + retained so each pane keeps its state across navigation.
-    private(set) lazy var chats = ChatsModel(hermesPath: services.hermesPath)
+    // `chats` is created on first access (opening the Chat pane). We avoid `lazy`
+    // here so other code can *peek* at whether it exists (`existingChats`) without
+    // forcing a `hermes acp` session to spawn for a user who never opened Chat.
+    private var _chats: ChatsModel?
+    var chats: ChatsModel {
+        if let c = _chats { return c }
+        let c = ChatsModel(hermesPath: services.hermesPath, persistModel: services.persistChatModel)
+        _chats = c; return c
+    }
+    /// The chats model only if it has already been created (no side effects).
+    var existingChats: ChatsModel? { _chats }
+
     private(set) lazy var models = ModelPickerModel(services: services)
     private(set) lazy var kanban = KanbanModel(exec: services.exec)
     private(set) lazy var cron = CronModel(exec: services.exec)

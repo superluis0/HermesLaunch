@@ -24,6 +24,11 @@ final class ChatMessage: ObservableObject, Identifiable {
     let id = UUID()
     let role: ChatRole
     @Published var text: String
+    /// Block-parsed form of `text` for assistant turns. Computed once whenever the
+    /// text changes (see `ChatViewModel.flush`) so SwiftUI layout never re-parses —
+    /// re-parsing inside `View.body` on a growing stream pegged the main thread and
+    /// froze the app (the markdown parser is O(n) over the whole accumulated reply).
+    @Published var blocks: [MarkdownBlock] = []
     @Published var thoughts: String = ""
     @Published var tools: [ToolEvent] = []
     @Published var thinkingSeconds: Int? = nil   // set once thinking ends
@@ -51,7 +56,8 @@ final class ChatViewModel: ObservableObject {
 
     var onSend: ((_ text: String, _ images: [(base64: String, mime: String)]) -> Void)?
     var onStop: (() -> Void)?
-    var onSetModel: ((String) -> Void)?
+    var onSetModel: ((String) -> Void)?          // switch the live ACP session
+    var onPersistModel: ((String) -> Void)?      // write the choice to the global default
 
     private var current: ChatMessage?
     private var thinkingStart: Date?
@@ -79,10 +85,15 @@ final class ChatViewModel: ObservableObject {
         onSend?("/\(name)", [])
     }
 
-    func selectModel(_ id: String) {
+    /// `persist: true` (the user picking from the in-chat dropdown) also writes the
+    /// choice back to the global default model; `persist: false` (a programmatic
+    /// sync from a config-side change) only switches the live session, so the two
+    /// directions don't loop.
+    func selectModel(_ id: String, persist: Bool = true) {
         guard id != currentModel else { return }
         currentModel = id
         onSetModel?(id)
+        if persist { onPersistModel?(id) }
     }
 
     func attach(url: URL) {
@@ -157,6 +168,19 @@ final class ChatViewModel: ObservableObject {
         current = nil
     }
 
+    /// Clear the transcript and streaming state (used when a chat reconnects to a
+    /// fresh ACP session). `models`/`currentModel`/`commands` are left intact — the
+    /// new session repopulates them via its own callbacks.
+    func reset() {
+        stopFlush()
+        messages.removeAll()
+        current = nil
+        isStreaming = false
+        thinkingStart = nil
+        pendingThought = ""
+        pendingAnswer = ""
+    }
+
     // MARK: internals
     private func freezeThinking() {
         guard let a = current, a.thinkingSeconds == nil, let start = thinkingStart else { return }
@@ -172,7 +196,11 @@ final class ChatViewModel: ObservableObject {
     private func flush() {
         guard let a = current else { return }
         if !pendingThought.isEmpty { a.thoughts += pendingThought; pendingThought = "" }
-        if !pendingAnswer.isEmpty { a.text += pendingAnswer; pendingAnswer = "" }
+        if !pendingAnswer.isEmpty {
+            a.text += pendingAnswer; pendingAnswer = ""
+            // Parse here (once per content change), never in the view's layout path.
+            a.blocks = MarkdownBlock.parse(a.text)
+        }
     }
 }
 
@@ -309,6 +337,10 @@ enum MarkdownBlock {
 
 struct MarkdownView: View {
     private let blocks: [MarkdownBlock]
+    /// Render pre-parsed blocks. Parsing happens in the view model (on content
+    /// change), not here, so repeated layout passes don't re-parse the whole reply.
+    init(blocks: [MarkdownBlock]) { self.blocks = blocks }
+    /// Convenience for one-off, non-streaming text (parses immediately).
     init(_ source: String) { blocks = MarkdownBlock.parse(source) }
 
     var body: some View {
@@ -653,7 +685,7 @@ struct TurnView: View {
 
                 if !message.text.isEmpty {
                     if message.role == .assistant {
-                        MarkdownView(message.text)
+                        MarkdownView(blocks: message.blocks)
                     } else {
                         Text(message.text)
                             .font(.system(size: 13))
@@ -764,17 +796,30 @@ struct ToolRow: View {
 /// it no longer carries its own window).
 final class ChatSession {
     let vm = ChatViewModel()
-    private let client: ACPClient
+    private let hermesPath: String
+    private let persistModel: (String) -> Void
+    private var client: ACPClient
     private var started = false
 
     /// Called when the agent reports a session title (for a window/pane label).
     var onTitle: ((String) -> Void)?
 
-    init(hermesPath: String) {
+    /// `persistModel` writes an in-chat model pick back to the global default
+    /// (no-op by default so the session works without the unified-app plumbing).
+    init(hermesPath: String, persistModel: @escaping (String) -> Void = { _ in }) {
+        self.hermesPath = hermesPath
+        self.persistModel = persistModel
         client = ACPClient(hermesPath: hermesPath)
+        wire()
+    }
+
+    /// Bind the view model and the current ACP client together. Re-runnable so a
+    /// `restart()` can rebind a freshly created client.
+    private func wire() {
         vm.onSend = { [weak self] t, imgs in self?.client.send(t, images: imgs) }
         vm.onStop = { [weak self] in self?.client.cancel() }
         vm.onSetModel = { [weak self] id in self?.client.setModel(id) }
+        vm.onPersistModel = { [weak self] id in self?.persistModel(id) }
 
         client.onStatus       = { [weak self] s in self?.vm.setStatus(s) }
         client.onThought      = { [weak self] t in self?.vm.appendThought(t) }
@@ -790,6 +835,25 @@ final class ChatSession {
     /// Connect to `hermes acp` (idempotent).
     func start() { guard !started else { return }; started = true; client.start() }
     func shutdown() { client.shutdown() }
+
+    /// True until the user has sent anything — restarting here loses no work.
+    var isEmpty: Bool { vm.messages.isEmpty }
+
+    /// Switch this chat's model in place via ACP `session/set_model`, updating the
+    /// in-chat picker selection. Best-effort: reliably switches among the running
+    /// session's available models (same provider/account).
+    func switchModel(_ modelId: String) { vm.selectModel(modelId, persist: false) }
+
+    /// Tear down and reconnect a fresh ACP session, which adopts the current global
+    /// default model/provider from `hermes config`. Clears the (empty) transcript.
+    func restart() {
+        client.shutdown()
+        vm.reset()
+        client = ACPClient(hermesPath: hermesPath)
+        wire()
+        started = true
+        client.start()
+    }
 }
 
 // MARK: - Multiple chats
@@ -801,8 +865,8 @@ final class ChatTab: Identifiable, ObservableObject {
     let session: ChatSession
     @Published var title: String = "New Chat"
 
-    init(hermesPath: String) {
-        session = ChatSession(hermesPath: hermesPath)
+    init(hermesPath: String, persistModel: @escaping (String) -> Void = { _ in }) {
+        session = ChatSession(hermesPath: hermesPath, persistModel: persistModel)
         session.onTitle = { [weak self] t in
             let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
             self?.title = trimmed.isEmpty ? "New Chat" : trimmed
@@ -817,21 +881,33 @@ final class ChatsModel: ObservableObject {
     @Published var tabs: [ChatTab] = []
     @Published var activeId: UUID?
     private let hermesPath: String
+    private let persistModel: (String) -> Void
 
-    init(hermesPath: String) {
+    init(hermesPath: String, persistModel: @escaping (String) -> Void = { _ in }) {
         self.hermesPath = hermesPath
+        self.persistModel = persistModel
         newChat()
     }
 
     var active: ChatTab? { tabs.first { $0.id == activeId } }
 
     func newChat() {
-        let tab = ChatTab(hermesPath: hermesPath)
+        let tab = ChatTab(hermesPath: hermesPath, persistModel: persistModel)
         tabs.append(tab)
         activeId = tab.id
     }
 
     func select(_ id: UUID) { activeId = id }
+
+    /// Adopt a newly-chosen global default model across every open chat. Empty
+    /// chats reconnect cleanly (a fresh ACP session picks up the new model and
+    /// provider); chats that already have messages switch in place, best-effort.
+    func applyDefaultModel(_ modelId: String) {
+        for tab in tabs {
+            if tab.session.isEmpty { tab.session.restart() }
+            else { tab.session.switchModel(modelId) }
+        }
+    }
 
     func close(_ id: UUID) {
         guard let idx = tabs.firstIndex(where: { $0.id == id }) else { return }
