@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Feature 6 — Apple-style "clean sectioned" chat, rendered in SwiftUI and hosted
 // in an AppKit window. Driven by the unchanged ACPClient (QuickChat.swift).
@@ -32,6 +33,7 @@ final class ChatMessage: ObservableObject, Identifiable {
     @Published var thoughts: String = ""
     @Published var tools: [ToolEvent] = []
     @Published var thinkingSeconds: Int? = nil   // set once thinking ends
+    @Published var stopped = false               // user cancelled this turn mid-stream
     var imageThumb: NSImage? = nil
     init(role: ChatRole, text: String = "") {
         self.role = role
@@ -70,6 +72,7 @@ final class ChatViewModel: ObservableObject {
         let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let img = pendingImage
         guard isReady, !isStreaming, (!t.isEmpty || img != nil) else { return }
+        HLHaptics.tap()
         draft = ""; pendingImage = nil
         let um = ChatMessage(role: .user, text: t.isEmpty ? "🖼 Image" : t)
         um.imageThumb = img?.thumb
@@ -102,6 +105,13 @@ final class ChatViewModel: ObservableObject {
                                     mime: Self.mime(for: url.pathExtension),
                                     thumb: NSImage(contentsOf: url),
                                     name: url.lastPathComponent)
+    }
+
+    /// Attach raw image bytes (clipboard paste or drag-and-drop).
+    func attach(data: Data, mime: String, name: String) {
+        guard let thumb = NSImage(data: data) else { return }
+        pendingImage = PendingImage(base64: data.base64EncodedString(),
+                                    mime: mime, thumb: thumb, name: name)
     }
 
     private func beginTurn(user: ChatMessage) {
@@ -161,11 +171,12 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    func finishTurn() {
+    func finishTurn(stopReason: String = "end_turn") {
         flush()
         freezeThinking()
         if let a = current {
             for i in a.tools.indices where a.tools[i].status == .running { a.tools[i].status = .done }
+            a.stopped = (stopReason == "cancelled")
         }
         isStreaming = false
         stopFlush()
@@ -387,16 +398,7 @@ struct MarkdownView: View {
                 }
             }
         case .code(let code):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .padding(10)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8).fill(DS.surfaceElevated))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DS.border.opacity(0.6)))
+            CodeBlockView(code: code)
         case .quote(let text):
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 2).fill(DS.accent.opacity(0.6)).frame(width: 3)
@@ -410,6 +412,53 @@ struct MarkdownView: View {
 
     private func headingSize(_ level: Int) -> CGFloat {
         switch level { case 1: return 20; case 2: return 17; case 3: return 15; default: return 13.5 }
+    }
+}
+
+/// A fenced code block with a hover-revealed one-click copy button.
+private struct CodeBlockView: View {
+    let code: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(10)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+                withAnimation(DS.Motion.quick) { copied = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    withAnimation(DS.Motion.quick) { copied = false }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 9, weight: .semibold))
+                    if copied { Text("Copied").font(DS.Typography.micro) }
+                }
+                .foregroundStyle(copied ? AnyShapeStyle(DS.success) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5).fill(DS.surface))
+                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(DS.border.opacity(0.6)))
+            }
+            .buttonStyle(.plain)
+            .padding(5)
+            .opacity(hovering || copied ? 1 : 0)
+            .help("Copy code")
+        }
+        .background(RoundedRectangle(cornerRadius: 8).fill(DS.surfaceElevated))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DS.border.opacity(0.6)))
+        .animation(DS.Motion.quick, value: hovering)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -433,6 +482,7 @@ struct ChatView: View {
     @ObservedObject var vm: ChatViewModel
     @ObservedObject private var voice = VoiceEngine.shared
     @ObservedObject private var settings = AppSettings.shared
+    @State private var dropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -446,6 +496,56 @@ struct ChatView: View {
         }
         .frame(minWidth: 460, minHeight: 460)
         .background(chatBackground)
+        // Drag an image anywhere onto the chat to attach it.
+        .onDrop(of: [.fileURL, .image], isTargeted: $dropTargeted) { providers in
+            handleImageProviders(providers)
+        }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                    .strokeBorder(DS.accent, style: StrokeStyle(lineWidth: 2, dash: [6]))
+                    .background(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                        .fill(DS.accent.opacity(0.06)))
+                    .padding(8)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(DS.Motion.quick, value: dropTargeted)
+    }
+
+    /// Resolve dropped/pasted item providers into a single attached image
+    /// (last one wins — the composer has one image slot).
+    @discardableResult
+    private func handleImageProviders(_ providers: [NSItemProvider]) -> Bool {
+        let imageExts = ["png", "jpg", "jpeg", "gif", "webp"]
+        var handled = false
+        for p in providers {
+            if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, imageExts.contains(url.pathExtension.lowercased()) else { return }
+                    DispatchQueue.main.async { vm.attach(url: url) }
+                }
+            } else if p.hasItemConformingToTypeIdentifier(UTType.png.identifier) {
+                handled = true
+                p.loadDataRepresentation(forTypeIdentifier: UTType.png.identifier) { data, _ in
+                    guard let data else { return }
+                    DispatchQueue.main.async { vm.attach(data: data, mime: "image/png", name: "Pasted image.png") }
+                }
+            } else if p.hasItemConformingToTypeIdentifier(UTType.tiff.identifier) {
+                handled = true
+                p.loadDataRepresentation(forTypeIdentifier: UTType.tiff.identifier) { data, _ in
+                    // Re-encode TIFF (the common clipboard format) as PNG.
+                    guard let data, let img = NSImage(data: data),
+                          let tiff = img.tiffRepresentation,
+                          let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+                    else { return }
+                    DispatchQueue.main.async { vm.attach(data: png, mime: "image/png", name: "Pasted image.png") }
+                }
+            }
+        }
+        return handled
     }
 
     /// Themed background with a faint accent glow behind the hero (Nous-style texture).
@@ -528,6 +628,11 @@ struct ChatView: View {
                     .lineLimit(1...6)
                     .foregroundStyle(DS.textPrimary)
                     .onSubmit { vm.submit() }
+                    // ⌘V of an image attaches it; plain-text paste is untouched
+                    // (SwiftUI only routes paste here when the pasteboard matches).
+                    .onPasteCommand(of: [.fileURL, .png, .tiff, .image]) { providers in
+                        handleImageProviders(providers)
+                    }
                 micButton
                 waveformButton
                 sendOrStopButton
@@ -673,13 +778,25 @@ struct TurnView: View {
     @ObservedObject var message: ChatMessage
     let hermesGradient: LinearGradient
     @State private var expandThinking = true
+    @State private var hovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
             avatar
             VStack(alignment: .leading, spacing: 5) {
-                Text(message.role == .user ? "You" : "Hermes")
-                    .font(.system(size: 12.5, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(message.role == .user ? "You" : "Hermes")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    if !message.text.isEmpty {
+                        Button(action: copyMessage) {
+                            Image(systemName: "doc.on.doc").font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(hovering ? 1 : 0)
+                        .help("Copy message")
+                    }
+                }
 
                 if message.role == .assistant {
                     if !message.thoughts.isEmpty { thinking }
@@ -707,11 +824,31 @@ struct TurnView: View {
                         .frame(maxWidth: 220, maxHeight: 160)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
+
+                if message.stopped {
+                    Label("Stopped", systemImage: "stop.circle")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
+        .contextMenu {
+            if !message.text.isEmpty {
+                Button("Copy Message") { copyMessage() }
+            }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    /// Copies the raw markdown source (most useful for pasting elsewhere).
+    private func copyMessage() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.text, forType: .string)
+        ToastCenter.shared.show("Message copied", systemImage: "doc.on.doc", duration: 1.6)
     }
 
     private var avatar: some View {
@@ -834,7 +971,7 @@ final class ChatSession {
         client.onToolStart    = { [weak self] id, kind, title in self?.vm.addTool(id: id, kind: kind, title: title) }
         client.onToolUpdate   = { [weak self] id, status in self?.vm.updateTool(id: id, status: status) }
         client.onSessionTitle = { [weak self] t in self?.onTitle?(t) }
-        client.onTurnComplete = { [weak self] _ in self?.vm.finishTurn() }
+        client.onTurnComplete = { [weak self] reason in self?.vm.finishTurn(stopReason: reason) }
         client.onModels       = { [weak self] models, current in self?.vm.models = models; self?.vm.currentModel = current }
         client.onCommands     = { [weak self] cmds in self?.vm.commands = cmds }
     }
@@ -988,7 +1125,7 @@ private struct ChatTabChip: View {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
             }
             .buttonStyle(.plain)
-            .opacity(hover || active ? 0.6 : 0.0)
+            .opacity(hover ? 0.9 : (active ? 0.55 : 0.3))
             .help("Close chat")
         }
         .padding(.horizontal, 9)

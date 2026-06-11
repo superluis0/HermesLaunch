@@ -22,11 +22,17 @@ final class MainWindowController: NSObject {
     /// handled centrally by the AppDelegate's window-close observer.
     func show(section: ShellSection? = nil) {
         if window == nil { build() }
-        if let section { model.selection = section }
+        if let section {
+            withAnimation(DS.Motion.gentle) { model.selection = section }
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
+
+    /// Whether the shell window currently has key focus (used by menu actions
+    /// that behave differently inside the main window, e.g. ⌘W closes a chat tab).
+    var isKeyWindow: Bool { window?.isKeyWindow == true }
 
     private func build() {
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),

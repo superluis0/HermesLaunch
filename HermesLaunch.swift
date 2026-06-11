@@ -2033,6 +2033,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openChat() { mainWindow?.show(section: .chat) }
 
+    /// ⌘T — open the Chat pane and start a fresh chat tab.
+    @objc private func newChatTab() {
+        mainWindow?.show(section: .chat)
+        mainWindow?.model.chats.newChat()
+    }
+
+    /// ⌘W — close the active chat tab when the main window's Chat pane is focused
+    /// with more than one tab open; otherwise close the key window as usual.
+    @objc private func closeTabOrWindow() {
+        if let mw = mainWindow, mw.isKeyWindow,
+           mw.model.selection == .chat,
+           let chats = mw.model.existingChats, chats.tabs.count > 1,
+           let active = chats.activeId {
+            chats.close(active)
+        } else {
+            NSApp.keyWindow?.performClose(nil)
+        }
+    }
+
     // MARK: - Scheduled Tasks window (Feature 10 · Phase 1)
 
     @objc private func openScheduledTasks() { mainWindow?.show(section: .scheduled) }
@@ -2219,6 +2238,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
 
+        let fileItem = NSMenuItem(); mainMenu.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        let newChat = fileMenu.addItem(withTitle: "New Chat", action: #selector(newChatTab), keyEquivalent: "t")
+        newChat.target = self
+        fileItem.submenu = fileMenu
+
         let viewItem = NSMenuItem(); mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
         let pal = viewMenu.addItem(withTitle: "Command Palette…", action: #selector(openPalette), keyEquivalent: "k")
@@ -2228,7 +2253,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let windowItem = NSMenuItem(); mainMenu.addItem(windowItem)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        // Smart Close: inside the main window's Chat pane with several tabs open,
+        // ⌘W closes the active tab; everywhere else it closes the window as usual.
+        let closeItem = windowMenu.addItem(withTitle: "Close", action: #selector(closeTabOrWindow), keyEquivalent: "w")
+        closeItem.target = self
         windowItem.submenu = windowMenu
 
         NSApp.mainMenu = mainMenu
