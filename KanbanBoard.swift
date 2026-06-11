@@ -48,7 +48,7 @@ final class KanbanModel: ObservableObject {
             let parsed = Self.parse(out)
             DispatchQueue.main.async {
                 self.loading = false
-                if let parsed { self.tasks = parsed; self.errorText = nil }
+                if let parsed { self.tasks = self.reconcile(parsed); self.errorText = nil }
                 else if self.tasks.isEmpty { self.errorText = out.trimmingCharacters(in: .whitespacesAndNewlines) }
             }
         }
@@ -83,6 +83,58 @@ final class KanbanModel: ObservableObject {
     func block(_ id: String, reason: String)  { run(["kanban", "block", id] + (reason.isEmpty ? [] : [reason])) }
     func assign(_ id: String, profile: String) { run(["kanban", "assign", id, profile]) }
     func comment(_ id: String, text: String)   { run(["kanban", "comment", id, text]) }
+
+    // MARK: Drag-and-drop moves
+    //
+    // Optimistic status held briefly so a drag lands instantly even though the
+    // CLI call + 3s polling are async. After `until` the server is authoritative.
+    private var optimistic: [String: (status: String, until: Date)] = [:]
+
+    /// The CLI verb (and toast label) for dragging a task to `target`, or nil if
+    /// the move has no direct verb. Derived from the kanban CLI:
+    ///   promote  — todo → ready          unblock — blocked → ready
+    ///   complete — any active → done     block   — any active → blocked
+    /// (triage → todo has no plain verb; `specify` is an agent sweep.)
+    private static func dragVerb(from status: String, to target: String) -> (args: [String], toast: String)? {
+        guard status != target else { return nil }
+        switch (status, target) {
+        case ("todo", "ready"):    return (["kanban", "promote"], "Promoted to Ready")
+        case ("blocked", "ready"): return (["kanban", "unblock"], "Unblocked")
+        case (_, "done") where status != "blocked":   return (["kanban", "complete"], "Completed")
+        case (_, "blocked") where status != "done":   return (["kanban", "block"], "Blocked")
+        default: return nil
+        }
+    }
+
+    /// Handle a card dropped on a column. Returns false for moves with no CLI
+    /// verb (the drag springs back). Optimistic: the card lands immediately and
+    /// the next `load()` reconciles against the server.
+    @discardableResult
+    func move(_ id: String, to target: String) -> Bool {
+        guard let task = tasks.first(where: { $0.id == id }),
+              let (args, toast) = Self.dragVerb(from: task.status, to: target) else { return false }
+        withAnimation(DS.Motion.spring) {
+            if let i = tasks.firstIndex(where: { $0.id == id }) { tasks[i].status = target }
+        }
+        optimistic[id] = (target, Date().addingTimeInterval(5))
+        HLHaptics.snap()
+        ToastCenter.shared.show("\(toast) — “\(task.title)”", systemImage: "arrow.right.circle")
+        run(args + [id])
+        return true
+    }
+
+    /// Keep optimistic statuses (≤5s) from being clobbered by an in-flight poll.
+    private func reconcile(_ parsed: [KanbanTask]) -> [KanbanTask] {
+        var merged = parsed
+        let now = Date()
+        optimistic = optimistic.filter { $0.value.until > now }
+        for (id, o) in optimistic {
+            guard let i = merged.firstIndex(where: { $0.id == id }) else { continue }
+            if merged[i].status == o.status { optimistic.removeValue(forKey: id) }   // server caught up
+            else { merged[i].status = o.status }
+        }
+        return merged
+    }
 
     func dispatch(max: Int = 4) {
         DispatchQueue.main.async { self.lastDispatch = "Dispatching…" }
@@ -128,6 +180,7 @@ struct KanbanBoardView: View {
     @State private var prompt: KanbanPrompt?
     @State private var showNewTask = false
     @State private var confirmingArchive: KanbanTask?
+    @State private var dropTarget: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -192,6 +245,7 @@ struct KanbanBoardView: View {
 
     private func column(_ status: String) -> some View {
         let items = model.tasks(in: status)
+        let targeted = dropTarget == status
         return VStack(alignment: .leading, spacing: DS.Space.sm) {
             HStack(spacing: DS.Space.sm) {
                 HLStatusDot(color: color(for: status))
@@ -201,14 +255,30 @@ struct KanbanBoardView: View {
             .padding(.horizontal, DS.Space.xs)
             ScrollView {
                 LazyVStack(spacing: DS.Space.sm) {
-                    ForEach(items) { task in card(task) }
+                    ForEach(items) { task in
+                        card(task)
+                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    }
                 }
             }
         }
         .frame(width: 244)
         .padding(DS.Space.sm)
         .background(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-            .fill(Color.primary.opacity(0.04)))
+            .fill(targeted ? DS.accent.opacity(0.06) : Color.primary.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+            .strokeBorder(targeted ? DS.accent.opacity(0.5) : .clear, lineWidth: 1.5))
+        // Drop a dragged card here; moves without a CLI verb return false and
+        // the drag springs back.
+        .dropDestination(for: String.self) { ids, _ in
+            guard let id = ids.first else { return false }
+            return model.move(id, to: status)
+        } isTargeted: { over in
+            withAnimation(DS.Motion.quick) {
+                if over { dropTarget = status }
+                else if dropTarget == status { dropTarget = nil }
+            }
+        }
     }
 
     private func card(_ task: KanbanTask) -> some View {
@@ -330,6 +400,7 @@ private struct KanbanCardView: View {
         .offset(y: hovering ? -1 : 0)
         .animation(DS.Motion.quick, value: hovering)
         .onHover { hovering = $0 }
+        .draggable(task.id)
     }
 }
 
