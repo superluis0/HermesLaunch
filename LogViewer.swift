@@ -41,7 +41,20 @@ final class LogModel: ObservableObject {
         }
     }
 
-    func stop() { timer?.invalidate(); timer = nil }
+    // Refcounted appear/disappear: during the shell's pane crossfade the new
+    // view's onAppear can precede the old view's onDisappear, which would kill
+    // an active Follow timer. Only stop when no view remains.
+    private var viewCount = 0
+
+    func viewAppeared() {
+        viewCount += 1
+        refresh()
+        if following, timer == nil { setFollowing(true) }
+    }
+    func viewDisappeared() {
+        viewCount = max(0, viewCount - 1)
+        if viewCount == 0 { timer?.invalidate(); timer = nil }
+    }
 }
 
 struct LogView: View {
@@ -65,8 +78,8 @@ struct LogView: View {
         }
         .frame(minWidth: 520, minHeight: 360)
         .background(DS.bg)
-        .onAppear { model.refresh() }
-        .onDisappear { model.stop() }
+        .onAppear { model.viewAppeared() }
+        .onDisappear { model.viewDisappeared() }
     }
 
     private var controls: some View {

@@ -119,8 +119,18 @@ struct AppShellView: View {
                 }
                 .navigationSplitViewColumnWidth(min: 208, ideal: 224, max: 300)
             } detail: {
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // ZStack so the outgoing and incoming panes coexist during the
+                // crossfade; `.id` gives each pane structural identity so the
+                // transition fires on selection change. Pane *models* live on
+                // ShellModel, so no state is lost.
+                ZStack {
+                    detail
+                        .id(model.selection)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .offset(y: 8)),
+                            removal: .opacity))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider().opacity(0.5)
             statusFooter
@@ -171,7 +181,7 @@ struct AppShellView: View {
         // Native selection binding → arrow-key navigation + VoiceOver announcements.
         let selection = Binding<ShellSection?>(
             get: { model.selection },
-            set: { if let v = $0 { model.selection = v } })
+            set: { if let v = $0 { withAnimation(DS.Motion.gentle) { model.selection = v } } })
         return List(selection: selection) {
             ForEach(ShellSection.allCases) { sec in
                 Label(sec.title, systemImage: sec.symbol)

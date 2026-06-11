@@ -105,9 +105,13 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func beginTurn(user: ChatMessage) {
-        messages.append(user)
         let assistant = ChatMessage(role: .assistant)
-        messages.append(assistant)
+        // Animate only the insertion; streaming text mutations never pass
+        // through an animation (no `.animation` on the transcript stack).
+        withAnimation(DS.Motion.spring) {
+            messages.append(user)
+            messages.append(assistant)
+        }
         current = assistant
         thinkingStart = nil; pendingThought = ""; pendingAnswer = ""
         isStreaming = true
@@ -477,6 +481,9 @@ struct ChatView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(vm.messages) { msg in
                         TurnView(message: msg, hermesGradient: DS.brandGradient)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 10)),
+                                removal: .identity))
                         if msg.id != vm.messages.last?.id {
                             Divider().padding(.leading, 52).opacity(0.5)
                         }
@@ -988,10 +995,11 @@ private struct ChatTabChip: View {
         .padding(.vertical, 5)
         .foregroundStyle(active ? DS.textPrimary : DS.textSecondary)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(active ? DS.accent.opacity(0.18) : DS.surfaceElevated.opacity(0.6)))
+            .fill(active ? DS.accent.opacity(0.18) : DS.surfaceElevated.opacity(hover ? 0.95 : 0.6)))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
             .strokeBorder(active ? DS.accent.opacity(0.5) : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
+        .animation(DS.Motion.quick, value: hover)
         .onTapGesture { onSelect() }
         .onHover { hover = $0 }
     }

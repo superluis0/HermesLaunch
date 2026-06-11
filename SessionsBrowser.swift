@@ -193,6 +193,7 @@ struct SessionsView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 9)
         .contentShape(Rectangle())
+        .hlHoverHighlight(cornerRadius: 0)
         .onTapGesture(count: 2) { model.onResume(s.id) }
     }
 

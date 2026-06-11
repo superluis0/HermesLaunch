@@ -94,8 +94,23 @@ final class KanbanModel: ObservableObject {
     }
 
     // MARK: Auto-refresh
+    //
+    // Refcounted: during the shell's pane crossfade the incoming view's onAppear
+    // can fire *before* the outgoing view's onDisappear, so a plain start/stop
+    // pair could kill the freshly started timer. Stop only when no view remains.
 
-    func startAuto() {
+    private var viewCount = 0
+
+    func viewAppeared() {
+        viewCount += 1
+        startAuto()
+    }
+    func viewDisappeared() {
+        viewCount = max(0, viewCount - 1)
+        if viewCount == 0 { stopAuto() }
+    }
+
+    private func startAuto() {
         load()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
@@ -103,7 +118,7 @@ final class KanbanModel: ObservableObject {
             self.load()
         }
     }
-    func stopAuto() { timer?.invalidate(); timer = nil }
+    private func stopAuto() { timer?.invalidate(); timer = nil }
 }
 
 // MARK: - View
@@ -125,8 +140,8 @@ struct KanbanBoardView: View {
         }
         .frame(minWidth: 820, minHeight: 520)
         .background(DS.bg)
-        .onAppear { model.startAuto() }
-        .onDisappear { model.stopAuto() }
+        .onAppear { model.viewAppeared() }
+        .onDisappear { model.viewDisappeared() }
         .sheet(isPresented: $showNewTask) { newTaskSheet }
         .sheet(item: $prompt) { p in promptSheet(p) }
     }
@@ -183,38 +198,7 @@ struct KanbanBoardView: View {
     }
 
     private func card(_ task: KanbanTask) -> some View {
-        HLCard {
-            VStack(alignment: .leading, spacing: DS.Space.sm) {
-                HStack(alignment: .top) {
-                    Text(task.title).font(DS.Typography.body.weight(.semibold)).lineLimit(2)
-                    Spacer(minLength: 4)
-                    Menu {
-                        Button("Promote ▸") { model.promote(task.id) }
-                        Button("Complete ✓") { model.complete(task.id) }
-                        if task.status == "blocked" { Button("Unblock") { model.unblock(task.id) } }
-                        else { Button("Block…") { prompt = .init(kind: .block, taskId: task.id) } }
-                        Button("Assign…") { prompt = .init(kind: .assign, taskId: task.id) }
-                        Button("Comment…") { prompt = .init(kind: .comment, taskId: task.id) }
-                        Divider()
-                        Button("Archive", role: .destructive) { model.archive(task.id) }
-                    } label: { Image(systemName: "ellipsis.circle").foregroundStyle(.secondary) }
-                        .menuStyle(.borderlessButton).frame(width: 22)
-                }
-                if let b = task.body, !b.isEmpty {
-                    Text(b).font(DS.Typography.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-                HStack(spacing: DS.Space.sm) {
-                    if task.status == "running" {
-                        ProgressView().controlSize(.small)
-                    }
-                    if let a = task.assignee, !a.isEmpty {
-                        Label(a, systemImage: "person.fill").font(DS.Typography.micro).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(task.id).font(DS.Typography.micro).foregroundStyle(.tertiary)
-                }
-            }
-        }
+        KanbanCardView(task: task, model: model, prompt: $prompt)
     }
 
     private func emptyState(_ message: String) -> some View {
@@ -286,6 +270,53 @@ struct KanbanBoardView: View {
             }
         }
         .padding(DS.Space.lg).frame(width: 380)
+    }
+}
+
+/// One task card. Separate view so it can carry hover state (and, later, drag).
+private struct KanbanCardView: View {
+    let task: KanbanTask
+    @ObservedObject var model: KanbanModel
+    @Binding var prompt: KanbanPrompt?
+    @State private var hovering = false
+
+    var body: some View {
+        HLCard {
+            VStack(alignment: .leading, spacing: DS.Space.sm) {
+                HStack(alignment: .top) {
+                    Text(task.title).font(DS.Typography.body.weight(.semibold)).lineLimit(2)
+                    Spacer(minLength: 4)
+                    Menu {
+                        Button("Promote ▸") { model.promote(task.id) }
+                        Button("Complete ✓") { model.complete(task.id) }
+                        if task.status == "blocked" { Button("Unblock") { model.unblock(task.id) } }
+                        else { Button("Block…") { prompt = .init(kind: .block, taskId: task.id) } }
+                        Button("Assign…") { prompt = .init(kind: .assign, taskId: task.id) }
+                        Button("Comment…") { prompt = .init(kind: .comment, taskId: task.id) }
+                        Divider()
+                        Button("Archive", role: .destructive) { model.archive(task.id) }
+                    } label: { Image(systemName: "ellipsis.circle").foregroundStyle(.secondary) }
+                        .menuStyle(.borderlessButton).frame(width: 22)
+                }
+                if let b = task.body, !b.isEmpty {
+                    Text(b).font(DS.Typography.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                HStack(spacing: DS.Space.sm) {
+                    if task.status == "running" {
+                        ProgressView().controlSize(.small)
+                    }
+                    if let a = task.assignee, !a.isEmpty {
+                        Label(a, systemImage: "person.fill").font(DS.Typography.micro).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(task.id).font(DS.Typography.micro).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .shadow(color: .black.opacity(hovering ? 0.18 : 0), radius: 6, y: 2)
+        .offset(y: hovering ? -1 : 0)
+        .animation(DS.Motion.quick, value: hovering)
+        .onHover { hovering = $0 }
     }
 }
 

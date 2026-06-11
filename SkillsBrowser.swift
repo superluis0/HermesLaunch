@@ -178,6 +178,7 @@ struct SkillsView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+        .hlHoverHighlight(cornerRadius: 0)
     }
 
     private var installedTab: some View {
@@ -209,6 +210,7 @@ struct SkillsView: View {
                             }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 9)
+                        .hlHoverHighlight(cornerRadius: 0)
                         Divider().opacity(0.4)
                     }
                 }

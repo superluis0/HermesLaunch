@@ -87,6 +87,10 @@ final class PaletteViewModel: ObservableObject {
     @Published var answer = ""
     @Published var thinking = ""
 
+    /// Drives the content scale-in on each summon (`onAppear` won't re-fire
+    /// because the panel is ordered out, not closed).
+    @Published var appearing = false
+
     // Injected by the controller.
     var commandsProvider: () -> [PaletteCommand] = { [] }
     var makeACP: () -> ACPClient? = { nil }
@@ -128,8 +132,13 @@ final class PaletteViewModel: ObservableObject {
         selection = min(selection, max(0, results.count - 1))
     }
 
+    /// True when the selection last moved via arrow keys — only then should the
+    /// list auto-scroll (scrolling under a hovering pointer feels broken).
+    var selectionMovedByKeyboard = false
+
     func move(_ delta: Int) {
         guard !results.isEmpty else { return }
+        selectionMovedByKeyboard = true
         selection = (selection + delta + results.count) % results.count
     }
 
@@ -222,6 +231,8 @@ struct PaletteView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.10))
         )
+        .scaleEffect(vm.appearing ? 1 : 0.97)
+        .animation(DS.Motion.quick, value: vm.appearing)
         .onAppear { focused = true }
     }
 
@@ -267,11 +278,16 @@ struct PaletteView: View {
                         row(cmd, selected: idx == vm.selection)
                             .id(idx)
                             .onTapGesture { vm.selection = idx; vm.activateSelection() }
+                            // Hover moves the selection (Raycast-style), reusing
+                            // the selected fill as the hover affordance.
+                            .onHover { if $0 { vm.selectionMovedByKeyboard = false; vm.selection = idx } }
                     }
                 }
                 .padding(DS.Space.sm)
             }
-            .onChange(of: vm.selection) { proxy.scrollTo(vm.selection, anchor: .center) }
+            .onChange(of: vm.selection) {
+                if vm.selectionMovedByKeyboard { proxy.scrollTo(vm.selection, anchor: .center) }
+            }
         }
     }
 
@@ -373,7 +389,16 @@ final class PaletteController: NSObject, NSWindowDelegate {
         onWillShow()
         vm.reset()
         NSApp.activate(ignoringOtherApps: true)
+        // Entrance: fade the panel in (AppKit) + scale the content up (SwiftUI).
+        vm.appearing = false
+        panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
+        DispatchQueue.main.async { [weak self] in self?.vm.appearing = true }
         installKeyMonitor()
     }
 
