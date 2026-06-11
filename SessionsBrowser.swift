@@ -118,6 +118,7 @@ struct SessionsView: View {
     @ObservedObject var model: SessionsModel
     @State private var renaming: SessionRow?
     @State private var renameText = ""
+    @State private var confirmingDelete: SessionRow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -143,6 +144,19 @@ struct SessionsView: View {
         .background(DS.bg)
         .onAppear { model.load() }
         .sheet(item: $renaming) { s in renameSheet(s) }
+        .alert("Delete this session?",
+               isPresented: Binding(get: { confirmingDelete != nil },
+                                    set: { if !$0 { confirmingDelete = nil } }),
+               presenting: confirmingDelete) { s in
+            Button("Delete", role: .destructive) {
+                HLHaptics.tap()
+                model.delete(s.id)
+                ToastCenter.shared.show("Deleted “\(s.title)”", systemImage: "trash")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { s in
+            Text("“\(s.title)” and its messages are removed permanently.")
+        }
     }
 
     private var header: some View {
@@ -187,7 +201,7 @@ struct SessionsView: View {
             Menu {
                 Button("Resume") { model.onResume(s.id) }
                 Button("Rename…") { renameText = s.title == "Untitled" ? "" : s.title; renaming = s }
-                Button("Delete", role: .destructive) { model.delete(s.id) }
+                Button("Delete", role: .destructive) { confirmingDelete = s }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
         }

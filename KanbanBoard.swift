@@ -127,6 +127,7 @@ struct KanbanBoardView: View {
     @ObservedObject var model: KanbanModel
     @State private var prompt: KanbanPrompt?
     @State private var showNewTask = false
+    @State private var confirmingArchive: KanbanTask?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -144,6 +145,19 @@ struct KanbanBoardView: View {
         .onDisappear { model.viewDisappeared() }
         .sheet(isPresented: $showNewTask) { newTaskSheet }
         .sheet(item: $prompt) { p in promptSheet(p) }
+        .alert("Archive this task?",
+               isPresented: Binding(get: { confirmingArchive != nil },
+                                    set: { if !$0 { confirmingArchive = nil } }),
+               presenting: confirmingArchive) { task in
+            Button("Archive", role: .destructive) {
+                HLHaptics.tap()
+                model.archive(task.id)
+                ToastCenter.shared.show("Archived “\(task.title)”", systemImage: "archivebox")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { task in
+            Text("“\(task.title)” is removed from the board.")
+        }
     }
 
     private var header: some View {
@@ -198,7 +212,7 @@ struct KanbanBoardView: View {
     }
 
     private func card(_ task: KanbanTask) -> some View {
-        KanbanCardView(task: task, model: model, prompt: $prompt)
+        KanbanCardView(task: task, model: model, prompt: $prompt, confirmingArchive: $confirmingArchive)
     }
 
     private func emptyState(_ message: String) -> some View {
@@ -278,6 +292,7 @@ private struct KanbanCardView: View {
     let task: KanbanTask
     @ObservedObject var model: KanbanModel
     @Binding var prompt: KanbanPrompt?
+    @Binding var confirmingArchive: KanbanTask?
     @State private var hovering = false
 
     var body: some View {
@@ -294,7 +309,7 @@ private struct KanbanCardView: View {
                         Button("Assign…") { prompt = .init(kind: .assign, taskId: task.id) }
                         Button("Comment…") { prompt = .init(kind: .comment, taskId: task.id) }
                         Divider()
-                        Button("Archive", role: .destructive) { model.archive(task.id) }
+                        Button("Archive", role: .destructive) { confirmingArchive = task }
                     } label: { Image(systemName: "ellipsis.circle").foregroundStyle(.secondary) }
                         .menuStyle(.borderlessButton).frame(width: 22)
                 }

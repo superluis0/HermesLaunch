@@ -62,7 +62,13 @@ final class SkillsModel: ObservableObject {
             DispatchQueue.main.async {
                 self.installing.remove(item.identifier)
                 let ok = out.lowercased().contains("install") && !out.lowercased().contains("blocked") && !out.lowercased().contains("error")
-                self.note = ok ? "Installed “\(item.name)”." : "“\(item.name)”: \(String(out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(160)))"
+                if ok {
+                    ToastCenter.shared.show("Installed “\(item.name)”", systemImage: "puzzlepiece.extension")
+                    self.note = nil
+                } else {
+                    // Failures stay in the note line — it carries the CLI's detail.
+                    self.note = "“\(item.name)”: \(String(out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(160)))"
+                }
             }
         }
     }
@@ -71,7 +77,9 @@ final class SkillsModel: ObservableObject {
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
             _ = self.exec(["skills", "uninstall", s.name, "--yes"])
-            DispatchQueue.main.async { self.note = "Uninstalled “\(s.name)”." }
+            DispatchQueue.main.async {
+                ToastCenter.shared.show("Uninstalled “\(s.name)”", systemImage: "puzzlepiece.extension")
+            }
             let parsed = SkillsModel.parseInstalled(self.exec(["skills", "list"]))
             DispatchQueue.main.async { self.installed = parsed; self.busy = false }
         }
@@ -112,6 +120,7 @@ final class SkillsModel: ObservableObject {
 
 struct SkillsView: View {
     @ObservedObject var model: SkillsModel
+    @State private var confirmingUninstall: InstalledSkill?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,6 +143,18 @@ struct SkillsView: View {
         }
         .frame(minWidth: 520, minHeight: 420)
         .background(DS.bg)
+        .alert("Uninstall this skill?",
+               isPresented: Binding(get: { confirmingUninstall != nil },
+                                    set: { if !$0 { confirmingUninstall = nil } }),
+               presenting: confirmingUninstall) { s in
+            Button("Uninstall", role: .destructive) {
+                HLHaptics.tap()
+                model.uninstall(s)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { s in
+            Text("“\(s.name)” will be removed. You can reinstall it from the hub later.")
+        }
     }
 
     private var searchTab: some View {
@@ -205,7 +226,7 @@ struct SkillsView: View {
                             }
                             Spacer(minLength: 8)
                             if s.removable {
-                                Button(role: .destructive) { model.uninstall(s) } label: { Image(systemName: "trash") }
+                                Button(role: .destructive) { confirmingUninstall = s } label: { Image(systemName: "trash") }
                                     .controlSize(.small)
                             }
                         }
