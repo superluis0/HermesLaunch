@@ -2006,6 +2006,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             cmd("send", "Quick Send", "paperplane", "") { [weak self] in self?.openQuickSend() },
             cmd("style", "Menu-Bar Style", "paintpalette", "") { [weak self] in self?.openMenuBarStyle() },
             cmd("doctor", "Run Doctor", "stethoscope", "Diagnose the Hermes setup") { [weak self] in self?.runDoctor() },
+            cmd("shortcuts", "Keyboard Shortcuts", "keyboard", "All HermesLaunch hotkeys") { [weak self] in self?.showShortcutCheatSheet() },
         ]
         return staticCommands + cachedDynamicCommands
     }
@@ -2248,6 +2249,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let viewMenu = NSMenu(title: "View")
         let pal = viewMenu.addItem(withTitle: "Command Palette…", action: #selector(openPalette), keyEquivalent: "k")
         pal.target = self
+        viewMenu.addItem(.separator())
+        // ⌘1–⌘9 jump straight to a pane (and open the window if it's closed).
+        // The status-bar menu's "Open HermesLaunch ⌘1" hint is unaffected — key
+        // equivalents inside an NSStatusItem menu only fire while it's open.
+        for (i, sec) in ShellSection.allCases.prefix(9).enumerated() {
+            let item = viewMenu.addItem(withTitle: sec.title,
+                                        action: #selector(goToSection(_:)),
+                                        keyEquivalent: String(i + 1))
+            item.target = self
+            item.representedObject = sec.rawValue
+        }
         viewItem.submenu = viewMenu
 
         let windowItem = NSMenuItem(); mainMenu.addItem(windowItem)
@@ -2259,8 +2271,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         closeItem.target = self
         windowItem.submenu = windowMenu
 
+        let helpItem = NSMenuItem(); mainMenu.addItem(helpItem)
+        let helpMenu = NSMenu(title: "Help")
+        // "?" renders as ⌘? (⇧⌘/) in the menu.
+        let cheats = helpMenu.addItem(withTitle: "Keyboard Shortcuts",
+                                      action: #selector(showShortcutCheatSheet), keyEquivalent: "?")
+        cheats.target = self
+        helpItem.submenu = helpMenu
+
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
+    }
+
+    /// ⌘1–⌘9 — select a sidebar pane (opening the main window if needed).
+    @objc private func goToSection(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let sec = ShellSection(rawValue: raw) else { return }
+        mainWindow?.show(section: sec)
+    }
+
+    /// ⌘? — overlay listing every shortcut, also reachable from the palette.
+    @objc private func showShortcutCheatSheet() {
+        mainWindow?.show()
+        withAnimation(DS.Motion.quick) { mainWindow?.model.showShortcuts = true }
     }
 
     @objc private func openFullDashboard() {

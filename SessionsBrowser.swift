@@ -127,8 +127,17 @@ struct SessionsView: View {
             searchBar
             Divider()
             if model.filtered.isEmpty {
-                Text(model.loading ? "Loading…" : "No sessions").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if model.loading {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if !model.query.isEmpty {
+                    HLEmptyState(systemImage: "magnifyingglass",
+                                 title: "No matches",
+                                 subtitle: "No session title, preview, or id contains “\(model.query)”.")
+                } else {
+                    HLEmptyState(systemImage: "clock.arrow.circlepath",
+                                 title: "No sessions yet",
+                                 subtitle: "Conversations you have with Hermes will appear here, ready to resume.")
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {

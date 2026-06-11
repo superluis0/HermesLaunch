@@ -216,14 +216,12 @@ struct KanbanBoardView: View {
     }
 
     private func emptyState(_ message: String) -> some View {
-        VStack(spacing: DS.Space.md) {
-            Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 40)).foregroundStyle(.tertiary)
-            Text("No tasks yet").font(DS.Typography.heading)
-            Text(message.isEmpty ? "Create a task to get started." : message)
-                .font(DS.Typography.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button { showNewTask = true } label: { Label("New Task", systemImage: "plus") }.buttonStyle(.hlPrimary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity).padding(DS.Space.xl)
+        HLEmptyState(systemImage: "rectangle.stack.badge.plus",
+                     title: "No tasks yet",
+                     subtitle: message.isEmpty ? "Create a task to get started." : message,
+                     actionTitle: "New Task",
+                     action: { showNewTask = true })
+            .padding(DS.Space.xl)
     }
 
     private func color(for status: String) -> Color {

@@ -104,13 +104,24 @@ final class PaletteViewModel: ObservableObject {
         recompute()
     }
 
+    /// How many of the leading results are "recent" (empty query only) — drives
+    /// the RECENT / COMMANDS section captions in the list.
+    @Published var recentCount = 0
+
     func recompute() {
         let all = commandsProvider()
         let q = query.trimmingCharacters(in: .whitespaces)
         var matched: [PaletteCommand]
         if q.isEmpty {
-            matched = all
+            // Float recently used commands (up to 5) above the rest.
+            let rank = Dictionary(uniqueKeysWithValues:
+                AppSettings.shared.paletteHistory.prefix(5).enumerated().map { ($1, $0) })
+            let recent = all.filter { rank[$0.id] != nil }
+                .sorted { (rank[$0.id] ?? .max) < (rank[$1.id] ?? .max) }
+            matched = recent + all.filter { rank[$0.id] == nil }
+            recentCount = recent.count
         } else {
+            recentCount = 0
             matched = all
                 .compactMap { cmd -> (PaletteCommand, Int)? in
                     guard let s = Self.fuzzyScore(q, cmd.title) else { return nil }
@@ -145,6 +156,13 @@ final class PaletteViewModel: ObservableObject {
     func activateSelection() {
         guard results.indices.contains(selection) else { return }
         let cmd = results[selection]
+        // Remember real commands so they float up next time (skip free-text asks).
+        if cmd.id != "ask" {
+            var history = AppSettings.shared.paletteHistory
+            history.removeAll { $0 == cmd.id }
+            history.insert(cmd.id, at: 0)
+            AppSettings.shared.paletteHistory = history
+        }
         cmd.run()
         if !cmd.keepsOpen { onClose() }
     }
@@ -275,6 +293,10 @@ struct PaletteView: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(Array(vm.results.enumerated()), id: \.element.id) { idx, cmd in
+                        if vm.recentCount > 0 {
+                            if idx == 0 { sectionCaption("RECENT") }
+                            else if idx == vm.recentCount { sectionCaption("COMMANDS") }
+                        }
                         row(cmd, selected: idx == vm.selection)
                             .id(idx)
                             .onTapGesture { vm.selection = idx; vm.activateSelection() }
@@ -289,6 +311,15 @@ struct PaletteView: View {
                 if vm.selectionMovedByKeyboard { proxy.scrollTo(vm.selection, anchor: .center) }
             }
         }
+    }
+
+    private func sectionCaption(_ title: String) -> some View {
+        Text(title)
+            .font(DS.Typography.micro)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DS.Space.md)
+            .padding(.top, DS.Space.xs)
     }
 
     private func row(_ cmd: PaletteCommand, selected: Bool) -> some View {

@@ -168,10 +168,16 @@ struct SkillsView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(model.results) { item in
-                        resultRow(item); Divider().opacity(0.4)
+            if model.results.isEmpty && !model.busy {
+                HLEmptyState(systemImage: "puzzlepiece.extension",
+                             title: model.query.isEmpty ? "Search the skill hub" : "No results",
+                             subtitle: "Try “pdf”, “github”, or “maps”.")
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.results) { item in
+                            resultRow(item); Divider().opacity(0.4)
+                        }
                     }
                 }
             }

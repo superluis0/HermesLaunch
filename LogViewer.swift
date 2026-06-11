@@ -64,16 +64,22 @@ struct LogView: View {
         VStack(spacing: 0) {
             controls
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(model.text.isEmpty ? "—" : model.text)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .id("END")
+            if model.text.isEmpty && !model.loading {
+                HLEmptyState(systemImage: "doc.text.magnifyingglass",
+                             title: "No log output",
+                             subtitle: "Pick another log, change the level filter, or start the gateway.")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        Text(model.text)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .id("END")
+                    }
+                    .onChange(of: model.text) { proxy.scrollTo("END", anchor: .bottom) }
                 }
-                .onChange(of: model.text) { proxy.scrollTo("END", anchor: .bottom) }
             }
         }
         .frame(minWidth: 520, minHeight: 360)

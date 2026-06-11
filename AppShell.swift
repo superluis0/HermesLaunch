@@ -64,6 +64,7 @@ struct HermesServices {
 
 final class ShellModel: ObservableObject {
     @Published var selection: ShellSection = .chat
+    @Published var showShortcuts = false
 
     // Status-bar state, pushed from the AppDelegate's pollState timer.
     @Published var gatewayRunning = false
@@ -138,6 +139,14 @@ struct AppShellView: View {
         .frame(minWidth: 1040, minHeight: 640)
         .overlay(alignment: .bottom) {
             HLToastView().padding(.bottom, 34)   // clears the status footer
+        }
+        .overlay {
+            if model.showShortcuts {
+                ShortcutCheatSheet {
+                    withAnimation(DS.Motion.quick) { model.showShortcuts = false }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .tint(DS.accent)
         .preferredColorScheme(DS.theme.isDark ? .dark : .light)
@@ -342,6 +351,62 @@ struct SettingsPane: View {
             Text(label).font(DS.Typography.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
             Text(value).font(DS.Typography.mono).textSelection(.enabled)
             Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - Shortcut cheat sheet
+
+/// ⌘? overlay listing every keyboard shortcut. Click outside or press Esc to dismiss.
+struct ShortcutCheatSheet: View {
+    let dismiss: () -> Void
+
+    private static let shortcuts: [(keys: String, what: String)] = [
+        ("⌥Space", "Command palette (anywhere)"),
+        ("⌘K", "Command palette (in-window)"),
+        ("⌘1 – ⌘9", "Jump to a sidebar pane"),
+        ("⌘T", "New chat tab"),
+        ("⌘W", "Close chat tab / window"),
+        ("↩", "Send message"),
+        ("⇧↩", "New line in composer"),
+        ("Esc", "Dismiss palette or this sheet"),
+        ("⌘?", "Keyboard shortcuts"),
+    ]
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { dismiss() }
+            VStack(alignment: .leading, spacing: DS.Space.md) {
+                HStack {
+                    Image(systemName: "keyboard").foregroundStyle(DS.accent)
+                    Text("Keyboard Shortcuts").font(DS.Typography.title)
+                    Spacer()
+                }
+                VStack(spacing: DS.Space.sm) {
+                    ForEach(Self.shortcuts, id: \.keys) { sc in
+                        HStack(spacing: DS.Space.md) {
+                            Text(sc.keys)
+                                .font(DS.Typography.mono)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(RoundedRectangle(cornerRadius: 5).fill(DS.surfaceElevated))
+                                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(DS.border.opacity(0.7)))
+                                .frame(width: 110, alignment: .leading)
+                            Text(sc.what).font(DS.Typography.body).foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+            .padding(DS.Space.xl)
+            .frame(width: 380)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous).fill(DS.surface))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                .strokeBorder(DS.border.opacity(0.7)))
+            .shadow(color: .black.opacity(0.3), radius: 28, y: 8)
+            // Hidden Esc handler.
+            .background(Button("") { dismiss() }.keyboardShortcut(.cancelAction).opacity(0))
         }
     }
 }
