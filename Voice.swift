@@ -87,17 +87,37 @@ final class VoiceEngine: ObservableObject {
 
     // MARK: Push-to-talk dictation
 
+    /// True from the moment a start is accepted until capture is running (or
+    /// failed). `status` alone can't guard re-entry: it only becomes `.recording`
+    /// after async mic-permission + model-load steps (seconds on first use), so a
+    /// second mic click in that window used to reach `beginCapture()` twice — and
+    /// a double `installTap` raises an ObjC NSException that Swift can't catch.
+    /// Set/cleared on the main thread (mic buttons are UI actions).
+    private var dictationStarting = false
+
     func startDictation() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if dictationStarting { return }
         if case .recording = status { return }
+        dictationStarting = true
         Task {
-            guard await requestMic() else { set(.error("Microphone access denied")); return }
-            guard await ensureASR() else { return }
+            guard await requestMic() else { finishStarting(.error("Microphone access denied")); return }
+            guard await ensureASR() else { finishStarting(nil); return }   // ensureASR already set the error
             do {
                 try beginCapture()
-                set(.recording)
+                finishStarting(.recording)
             } catch {
-                set(.error("Could not start mic: \(error.localizedDescription)"))
+                finishStarting(.error("Could not start mic: \(error.localizedDescription)"))
             }
+        }
+    }
+
+    /// Publish the outcome of a start attempt and release the start guard in the
+    /// same main-queue hop, so there is no instant where both are stale.
+    private func finishStarting(_ s: Status?) {
+        DispatchQueue.main.async {
+            if let s { self.status = s }
+            self.dictationStarting = false
         }
     }
 
@@ -129,12 +149,22 @@ final class VoiceEngine: ObservableObject {
         captureQueue.sync { captured.removeAll() }
         let input = engine.inputNode
         let inFormat = input.outputFormat(forBus: 0)
+        // A dead input (no mic, device unplugged) reports 0 Hz / 0 channels;
+        // installTap would raise an uncatchable NSException on such a format.
+        guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
+            throw NSError(domain: "voice", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "no usable microphone input"])
+        }
         guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                             sampleRate: 16_000, channels: 1, interleaved: false),
               let conv = AVAudioConverter(from: inFormat, to: outFormat) else {
-            throw NSError(domain: "voice", code: 1)
+            throw NSError(domain: "voice", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "audio converter unavailable"])
         }
         converter = conv
+        // Belt and braces: a leftover tap would also make installTap throw an
+        // NSException. Removing a tap that isn't there is harmless.
+        input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
             self?.append(buffer, outFormat: outFormat)
         }
